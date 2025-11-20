@@ -50,9 +50,9 @@ CheckpointsController.GetTrackDistanceState = function (Position: Vector3): numb
   local minDistanceToRay: number = math.huge
   local minDistanceCheckpoint: number = 0
   local minDistanceProgressDistance: number = math.huge
-  local Prev = CheckpointsController.Checkpoints[1]
+  local Prev: BasePart = CheckpointsController.Checkpoints[1]
   for i = 1, #CheckpointsController.Checkpoints + 1 do
-    local actualIndex = ((i - 1) % #CheckpointsController.Checkpoints) + 1 -- We should also count from the last checkpoint to the first checkpoint (start)
+    local actualIndex: number = ((i - 1) % #CheckpointsController.Checkpoints) + 1 -- We should also count from the last checkpoint to the first checkpoint (start)
     local Next: BasePart = CheckpointsController.Checkpoints[actualIndex]
     local CP = RayClosestPoint(Prev.Position, Next.Position, Position)
     local Distance = (CP - Position).Magnitude
@@ -65,7 +65,6 @@ CheckpointsController.GetTrackDistanceState = function (Position: Vector3): numb
     Prev = Next
   end
 
-  print(minDistanceCheckpoint, minDistanceToRay)
   return CheckpointsController.GetSizeTo(minDistanceCheckpoint) + minDistanceProgressDistance
 end
 

@@ -1,16 +1,16 @@
 {
   "name": "SP1",
-  "emitLegacyScripts": true,
+  "emitLegacyScripts": false,
   "tree": {
     "$className": "DataModel",
     "ServerScriptService": {
       "$className": "ServerScriptService",
 
-      "$path": "src/ServerScriptService"
+      "$path": "game/ServerScriptService"
     },
     "StarterPlayer": {
       "StarterPlayerScripts": {
-        "$path": "src/StarterPlayer/StarterPlayerScripts"
+        "$path": "game/StarterPlayer/StarterPlayerScripts"
       }
     }
   }

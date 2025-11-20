@@ -13,7 +13,7 @@ from gymnasium import spaces
 #total number of floats in the state vector (10 rays)
 RAYCASTS = 10
 NITRO_FUEL_STATE = 1
-PREV_ACTIONS = 3
+PREV_ACTIONS = 0
 STATE_DIM = RAYCASTS + NITRO_FUEL_STATE + PREV_ACTIONS
 
 #acceleration, steering, nitro_toggle

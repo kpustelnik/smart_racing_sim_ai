@@ -1,6 +1,6 @@
-local Constants = require(script.Parent.Constants)
-local Units = require(script.Parent.Units)
-local lerp = require(script.Parent.lerp)
+local Constants = require(script.Parent:WaitForChild('Constants'))
+local Units = require(script.Parent:WaitForChild('Units'))
+local function lerp(a: number, b: number, t: number): number return a + (b - a) * t end
 
 local car = script.Parent.Parent
 local chassis = car.Chassis
@@ -236,10 +236,10 @@ function Controller:reset()
 	end
 end
 
-function Controller:update(deltaTime: number)
+function Controller:update(deltaTime: number, attributes)
 	updateNitro(deltaTime)
-	updateEngine(deltaTime)
-	updateSteering()
+	updateEngine(deltaTime, attributes)
+	updateSteering(attributes)
 	updateWheelFriction()
 end
 
