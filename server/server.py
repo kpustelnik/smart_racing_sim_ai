@@ -87,7 +87,7 @@ replay_buffer = ReplayBuffer(
     BUFFER_SIZE,
     observation_space=dummy_env.observation_space, 
     action_space=dummy_env.action_space,           
-    device="cpu", 
+    device="auto", 
     n_envs=1
 )
 
@@ -103,9 +103,9 @@ async def websocket_endpoint(websocket: WebSocket):
             new_obs = np.array(data['current_observation']).reshape(STATE_DIM)
             action = np.array(data['last_action']).reshape(ACTION_DIM)
             reward = data['reward']
-            done = data['done']
+            terminated = data['terminated']
             replay_buffer.add(
-                last_obs, new_obs, action, reward, done, [{}]
+                last_obs, new_obs, action, reward, terminated, [{}]
             )
 
             if replay_buffer.size() > LEARNING_STARTS:

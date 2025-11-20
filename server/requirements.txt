@@ -2,3 +2,4 @@ stable-baselines3[extra]
 torch
 fastapi
 uvicorn
+uvicorn[standard]
