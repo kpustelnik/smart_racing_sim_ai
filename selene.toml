@@ -1,0 +1,6 @@
+std = "roblox"
+
+[rules]
+multiple_statements = "allow"
+empty_if = "allow"
+manual_table_clone = "allow"

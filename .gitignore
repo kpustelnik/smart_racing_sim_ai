@@ -1,0 +1,17 @@
+Packages
+ServerPackages
+sourcemap.json
+
+# Models file
+/*.rbxmx
+
+# Project place file
+/*.rbxlx
+/*.rbxl
+
+# Roblox Studio lock files
+/*.rbxlx.lock
+/*.rbxl.lock
+
+.vscode/*
+!.vscode/settings.template.md
