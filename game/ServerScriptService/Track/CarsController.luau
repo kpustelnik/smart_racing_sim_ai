@@ -4,6 +4,7 @@ local CarsFolder = Workspace:WaitForChild('Cars')
 
 local ServerStorage = game:GetService('ServerStorage')
 local CarModels = ServerStorage:WaitForChild('CarModels')
+local CarScripts = script.Parent.Parent:WaitForChild('Car'):WaitForChild('CarScripts')
 
 local CarsController = {}
 
@@ -43,6 +44,10 @@ CarsController.SpawnCars = function (carTypes: { string }): { Model }
     local carModelSpawned: Model = carModel:Clone()
     carModelSpawned.Parent = CarsFolder
     carModelSpawned:PivotTo(carSpawn.CFrame)
+
+    local Scripts: Folder = CarScripts:Clone()
+    Scripts.Name = 'Scripts'
+    Scripts.Parent = carModelSpawned
     
     table.insert(spawnedCars, carModelSpawned)
   end

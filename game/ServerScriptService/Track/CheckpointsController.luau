@@ -44,15 +44,15 @@ Part.CanTouch = false
 Part.CanQuery = false
 Part.Parent = game.Workspace
 
-CheckpointsController.GetTrackDistanceState = function (Position: Vector3): number
+CheckpointsController.GetTrackDistanceState = function (Position: Vector3): (number, number)
   if #CheckpointsController.Checkpoints == 0 then return 0 end
 
   local minDistanceToRay: number = math.huge
   local minDistanceCheckpoint: number = 0
   local minDistanceProgressDistance: number = math.huge
-  local Prev = CheckpointsController.Checkpoints[1]
+  local Prev: BasePart = CheckpointsController.Checkpoints[1]
   for i = 1, #CheckpointsController.Checkpoints + 1 do
-    local actualIndex = ((i - 1) % #CheckpointsController.Checkpoints) + 1 -- We should also count from the last checkpoint to the first checkpoint (start)
+    local actualIndex: number = ((i - 1) % #CheckpointsController.Checkpoints) + 1 -- We should also count from the last checkpoint to the first checkpoint (start)
     local Next: BasePart = CheckpointsController.Checkpoints[actualIndex]
     local CP = RayClosestPoint(Prev.Position, Next.Position, Position)
     local Distance = (CP - Position).Magnitude
@@ -65,12 +65,12 @@ CheckpointsController.GetTrackDistanceState = function (Position: Vector3): numb
     Prev = Next
   end
 
-  print(minDistanceCheckpoint, minDistanceToRay)
-  return CheckpointsController.GetSizeTo(minDistanceCheckpoint) + minDistanceProgressDistance
+  return CheckpointsController.GetSizeTo(minDistanceCheckpoint) + minDistanceProgressDistance, minDistanceCheckpoint
 end
 
-CheckpointsController.GetTrackProgressState = function (Position: Vector3): number
-  return math.clamp(CheckpointsController.GetTrackDistanceState(Position) / CheckpointsController.GetTrackSize(), 0, 1)
+CheckpointsController.GetTrackProgressState = function (Position: Vector3): (number, number)
+  local DistanceState, LastCheckpoint = CheckpointsController.GetTrackDistanceState(Position)
+  return math.clamp(DistanceState / CheckpointsController.GetTrackSize(), 0, 1), LastCheckpoint
 end
 
 -- Script (TODO: Move?)
