@@ -44,7 +44,7 @@ Part.CanTouch = false
 Part.CanQuery = false
 Part.Parent = game.Workspace
 
-CheckpointsController.GetTrackDistanceState = function (Position: Vector3): number
+CheckpointsController.GetTrackDistanceState = function (Position: Vector3): (number, number)
   if #CheckpointsController.Checkpoints == 0 then return 0 end
 
   local minDistanceToRay: number = math.huge
@@ -65,11 +65,12 @@ CheckpointsController.GetTrackDistanceState = function (Position: Vector3): numb
     Prev = Next
   end
 
-  return CheckpointsController.GetSizeTo(minDistanceCheckpoint) + minDistanceProgressDistance
+  return CheckpointsController.GetSizeTo(minDistanceCheckpoint) + minDistanceProgressDistance, minDistanceCheckpoint
 end
 
-CheckpointsController.GetTrackProgressState = function (Position: Vector3): number
-  return math.clamp(CheckpointsController.GetTrackDistanceState(Position) / CheckpointsController.GetTrackSize(), 0, 1)
+CheckpointsController.GetTrackProgressState = function (Position: Vector3): (number, number)
+  local DistanceState, LastCheckpoint = CheckpointsController.GetTrackDistanceState(Position)
+  return math.clamp(DistanceState / CheckpointsController.GetTrackSize(), 0, 1), LastCheckpoint
 end
 
 -- Script (TODO: Move?)

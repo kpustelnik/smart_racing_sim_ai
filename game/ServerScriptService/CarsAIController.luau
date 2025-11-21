@@ -17,13 +17,29 @@ local carEngine = Car:WaitForChild('Engine')
 local runningLast: boolean = false
 
 local CarController = require(Car:WaitForChild("Scripts"):WaitForChild("Controller"))
+local lap: number = 0
+local lastCheckpoint: number = 1
+local startTime: number = os.time()
 game:GetService('RunService').Heartbeat:Connect(function (dt: number): ()
   if runningLast then
     warn('Executed while running last')
     return
   end
   runningLast = true
-  local trackProgress: number = CheckpointsController.GetTrackProgressState(Car:GetPivot().Position)
+  local trackProgress: number, checkpoint: number = CheckpointsController.GetTrackProgressState(Car:GetPivot().Position)
+  if checkpoint == lastCheckpoint + 1 or (lastCheckpoint == #CheckpointsController.Checkpoints and checkpoint == 1) then
+    lastCheckpoint = checkpoint
+    if checkpoint == 1 then
+      lap += 1
+      lastCheckpoint = 1
+    end
+  end
+  local maxLegalProgress: number = CheckpointsController.GetSizeTo(lastCheckpoint + 1) / CheckpointsController.GetTrackSize()
+  local currentLegalProgress: number = CheckpointsController.GetSizeTo(lastCheckpoint) / CheckpointsController.GetTrackSize()
+  if trackProgress > maxLegalProgress then trackProgress = currentLegalProgress end -- Return to minimal just so the robot does not learn to cheat by reversing
+
+  local totalProgress= lap + trackProgress
+
   local rcResults: {number}? = CarsController.GetRaycasts(Car)
 
   local nitroStatus: number = carEngine:GetAttribute('_nitro') :: any
@@ -40,7 +56,7 @@ game:GetService('RunService').Heartbeat:Connect(function (dt: number): ()
       last_observation = lastRc,
       current_observation = rcResults,
       last_action = {curThrottle, curSteering, curNitro},
-      reward = trackProgress, -- TODO: Add laps
+      reward = totalProgress,
       terminated = 0
     }))
   end
