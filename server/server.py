@@ -6,6 +6,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from typing import Deque, Dict, List
 import os
+import threading
 
 from stable_baselines3.common.logger import configure
 from stable_baselines3 import SAC
@@ -66,6 +67,7 @@ class ModelStats:
 dummy_env = DummyGymEnv()
 active_models: Dict[str, SAC] = {}
 model_stats: Dict[str, ModelStats] = {}
+model_locks: Dict[str, threading.Lock] = {}
 
 def get_or_create_model(model_id: str) -> SAC:
     if model_id in active_models:
@@ -96,13 +98,25 @@ def get_or_create_model(model_id: str) -> SAC:
     
     active_models[model_id] = model
     model_stats[model_id] = ModelStats()
+    model_locks[model_id] = threading.Lock()
     
     return model
 
 async def run_training_background(model: SAC, model_id: str):
     stats = model_stats[model_id]
+    lock = model_locks[model_id] 
+
     try:
-        await asyncio.to_thread(model.train, gradient_steps=GRADIENT_STEPS, batch_size=BATCH_SIZE)
+        for _ in range(GRADIENT_STEPS):
+            # Define a wrapper that acquires the lock in the thread
+            def train_step():
+                with lock:
+                    model.train(gradient_steps=1, batch_size=BATCH_SIZE)
+            # Run ONE gradient step in a background thread
+            await asyncio.to_thread(train_step)
+            # Sleep briefly to yield control back to the event loop (allowing inference to happen)
+            await asyncio.sleep(0.001)
+
     except Exception as e:
         print(f"[{model_id}] Training Error: {e}")
     finally:
@@ -115,6 +129,8 @@ async def websocket_endpoint(websocket: WebSocket, model_id: str):
     
     model = get_or_create_model(model_id)
     stats = model_stats[model_id]
+    lock = model_locks[model_id] 
+
     try:
         while True:
             data = await websocket.receive_json()
@@ -131,15 +147,16 @@ async def websocket_endpoint(websocket: WebSocket, model_id: str):
 
             infos = [{}]
             if not stats.is_training: 
-                model.replay_buffer.add(
-                    last_obs, 
-                    new_obs, 
-                    action, 
-                    reward, 
-                    terminated, 
-                    infos
-                )
-
+                with lock:
+                    model.replay_buffer.add(
+                        last_obs, 
+                        new_obs, 
+                        action, 
+                        reward, 
+                        terminated, 
+                        infos
+                    )
+            
             stats.step_count += 1
             stats.current_episode_reward += reward_val
 
@@ -155,7 +172,9 @@ async def websocket_endpoint(websocket: WebSocket, model_id: str):
                 if (stats.episode_count >= MIN_EPISODES_BEFORE_SAVE and mean_reward > stats.best_mean_reward):
                     stats.best_mean_reward = mean_reward
                     path = os.path.join(MODELS_DIR, f"{model_id}_best")
-                    model.save(path)
+                    # PROTECT SAVE
+                    with lock:
+                        model.save(path)
                     print(f"[{model_id}] NEW BEST MEAN REWARD: Saved to {path}.zip")
 
                 # Reset current counter
@@ -168,16 +187,22 @@ async def websocket_endpoint(websocket: WebSocket, model_id: str):
 
             if stats.step_count % SAVE_FREQUENCY == 0:
                 save_path = os.path.join(MODELS_DIR, model_id)
-                model.save(save_path)
+                # PROTECT SAVE
+                with lock:
+                    model.save(save_path)
                 print(f"[{model_id}] Periodic Checkpoint Saved.")
 
-            action_to_take, _ = model.predict(new_obs, deterministic=False)
+            # PROTECT INFERENCE
+            with lock:
+                action_to_take, _ = model.predict(new_obs, deterministic=False)
+            
             await websocket.send_json({"action": action_to_take[0].tolist()})
 
     except WebSocketDisconnect:
         print("--- client disconnected ---")
         save_path = os.path.join(MODELS_DIR, model_id)
-        model.save(save_path)
+        with lock:
+            model.save(save_path)
     except Exception as e:
         print(f"An error occurred: {e}")
 
