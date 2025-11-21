@@ -1,9 +1,13 @@
+import asyncio
+from collections import deque
 import numpy as np
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
-from typing import List
+from typing import Deque, Dict, List
+import os
 
+from stable_baselines3.common.logger import configure
 from stable_baselines3 import SAC
 from stable_baselines3.common.buffers import ReplayBuffer
 import gymnasium
@@ -13,7 +17,7 @@ from gymnasium import spaces
 #total number of floats in the state vector (10 rays)
 RAYCASTS = 10
 NITRO_FUEL_STATE = 1
-PREV_ACTIONS = 3
+PREV_ACTIONS = 0 #3
 STATE_DIM = RAYCASTS + NITRO_FUEL_STATE + PREV_ACTIONS
 
 #acceleration, steering, nitro_toggle
@@ -22,107 +26,158 @@ ACTION_DIM = 3
 #hyperparams
 BUFFER_SIZE = 200000        #max experience count stored in memory
 BATCH_SIZE = 128            
-LEARNING_STARTS = 10000     #steps to collect before first training
+LEARNING_STARTS = 5000      #steps to collect before first training
 GAMMA = 0.99                #discount factor for future rewards
 TAU = 0.005                 #soft update coefficient
-LEARNING_RATE = 0.0003      
+LEARNING_RATE = 0.0003     
 
+TRAIN_FREQUENCY = 100       #train every 100 steps
+GRADIENT_STEPS = 100        #how many updates to do when we do train
+SAVE_FREQUENCY = 5_000      #save model every N steps
+MODELS_DIR = "saved_models"
+LOGS_DIR = "sb3_logs"
 
+#best model saving
+WINDOW_SIZE = 50             #how many episodes to average over
+MIN_EPISODES_BEFORE_SAVE = 5 #dont save "best" until we have a few runs
+
+os.makedirs(MODELS_DIR, exist_ok=True)
+os.makedirs(LOGS_DIR, exist_ok=True)
 app = FastAPI()
-class StepInput(BaseModel):
-    last_observation: List[float]    
-    last_action: List[float]         
-    current_observation: List[float] 
-    reward: float                    #reward received for the last action taken
-    terminated: bool                       #true if the training ended forcefully (car crashed or sth like that)
-
-class ActionOutput(BaseModel):
-    action: List[float]              #[accel, steer, nitro] to perform
-
 
 class DummyGymEnv(gymnasium.Env):
     def __init__(self):
         super().__init__()
-        
-        self.action_space = spaces.Box(
-            low=-1.0, high=1.0, shape=(ACTION_DIM,), dtype=np.float32
-        )
-        self.observation_space = spaces.Box(
-            low=-np.inf, high=np.inf, shape=(STATE_DIM,), dtype=np.float32
-        )
+        self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(ACTION_DIM,), dtype=np.float32)
+        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(STATE_DIM,), dtype=np.float32)
 
-    #not used but needed 
-    def step(self, action):
-        dummy_obs = self.observation_space.sample()
-        reward = 0
-        terminated = False 
-        truncated = False
-        info = {}
-        return dummy_obs, reward, terminated, truncated, info
+    def step(self, action): return self.observation_space.sample(), 0, False, False, {}
+    def reset(self, seed=None, options=None): return self.observation_space.sample(), {}
 
-    #not used but needed 
-    def reset(self, seed=None, options=None):
-        dummy_obs = self.observation_space.sample()
-        info = {}
-        return dummy_obs, info
-
+class ModelStats:
+    def __init__(self):
+        self.current_episode_reward = 0.0
+        self.recent_scores: Deque[float] = deque(maxlen=WINDOW_SIZE)
+        self.best_mean_reward = -np.inf
+        self.episode_count = 0
+        self.step_count = 0
+        self.is_training = False #lock flag
 
 dummy_env = DummyGymEnv()
+active_models: Dict[str, SAC] = {}
+model_stats: Dict[str, ModelStats] = {}
 
-#mlp - multilayer perceptron - fully connected NN
-model = SAC(
-    "MlpPolicy",
-    dummy_env, 
-    verbose=1,
-    learning_rate=LEARNING_RATE,
-    gamma=GAMMA,
-    tau=TAU,
-    learning_starts=LEARNING_STARTS,
-    buffer_size=BUFFER_SIZE, 
-    batch_size=BATCH_SIZE,
-    policy_kwargs=dict(net_arch=[256, 256]) #hidden layers 
-)
+def get_or_create_model(model_id: str) -> SAC:
+    if model_id in active_models:
+        return active_models[model_id]
 
-replay_buffer = ReplayBuffer(
-    BUFFER_SIZE,
-    observation_space=dummy_env.observation_space, 
-    action_space=dummy_env.action_space,           
-    device="auto", 
-    n_envs=1
-)
+    model_path = os.path.join(MODELS_DIR, f"{model_id}.zip")
+    if os.path.exists(model_path):
+        print(f"--- Loading existing model: {model_id} ---")
+        model = SAC.load(model_path, env=dummy_env)
+    else:
+        print(f"--- Creating NEW model: {model_id} ---")
+        model = SAC(
+            "MlpPolicy",
+            dummy_env,
+            verbose=1,
+            learning_rate=LEARNING_RATE,
+            gamma=GAMMA,
+            tau=TAU,
+            learning_starts=LEARNING_STARTS,
+            buffer_size=BUFFER_SIZE,
+            batch_size=BATCH_SIZE,
+            policy_kwargs=dict(net_arch=[256, 256])
+        )
 
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await websocket.accept()
-    print("--- client connected to websocket ---")
+    log_path = os.path.join(LOGS_DIR, model_id)
+    new_logger = configure(log_path, ["stdout", "csv"])
+    model.set_logger(new_logger)
     
+    active_models[model_id] = model
+    model_stats[model_id] = ModelStats()
+    
+    return model
+
+async def run_training_background(model: SAC, model_id: str):
+    stats = model_stats[model_id]
+    try:
+        await asyncio.to_thread(model.train, gradient_steps=GRADIENT_STEPS, batch_size=BATCH_SIZE)
+    except Exception as e:
+        print(f"[{model_id}] Training Error: {e}")
+    finally:
+        stats.is_training = False
+
+@app.websocket("/ws/{model_id}")
+async def websocket_endpoint(websocket: WebSocket, model_id: str):
+    await websocket.accept()
+    print(f"--- client connected to websocket for model ID: {model_id} ---")
+    
+    model = get_or_create_model(model_id)
+    stats = model_stats[model_id]
     try:
         while True:
             data = await websocket.receive_json()
-            last_obs = np.array(data['last_observation']).reshape(STATE_DIM)
-            new_obs = np.array(data['current_observation']).reshape(STATE_DIM)
-            action = np.array(data['last_action']).reshape(ACTION_DIM)
-            reward = data['reward']
-            terminated = data['terminated']
-            replay_buffer.add(
-                last_obs, new_obs, action, reward, terminated, [{}]
-            )
+            # print(data)
 
-            if replay_buffer.size() > LEARNING_STARTS:
-                replay_data = replay_buffer.sample(BATCH_SIZE)
-                model.train(
-                    replay_data.observations,
-                    replay_data.actions,
-                    replay_data.next_observations,
-                    replay_data.dones,
-                    replay_data.rewards,
+            last_obs = np.array(data['last_observation'], dtype=np.float32).reshape(1, STATE_DIM)
+            new_obs = np.array(data['current_observation'], dtype=np.float32).reshape(1, STATE_DIM)
+            action = np.array(data['last_action'], dtype=np.float32).reshape(1, ACTION_DIM)
+            reward = np.array([data['reward']], dtype=np.float32)
+            terminated = np.array([data['terminated']], dtype=bool)
+
+            reward_val = float(data['reward'])
+            terminated_val = bool(data['terminated'])
+
+            infos = [{}]
+            if not stats.is_training: 
+                model.replay_buffer.add(
+                    last_obs, 
+                    new_obs, 
+                    action, 
+                    reward, 
+                    terminated, 
+                    infos
                 )
 
+            stats.step_count += 1
+            stats.current_episode_reward += reward_val
+
+            if terminated_val:
+                stats.episode_count += 1
+                stats.recent_scores.append(stats.current_episode_reward)
+                
+                #calculate average
+                mean_reward = np.mean(stats.recent_scores)
+                print(f"[{model_id}] Ep {stats.episode_count} finished. Score: {stats.current_episode_reward:.2f} | Mean (L{len(stats.recent_scores)}): {mean_reward:.2f}")
+
+                #check for new highscore
+                if (stats.episode_count >= MIN_EPISODES_BEFORE_SAVE and mean_reward > stats.best_mean_reward):
+                    stats.best_mean_reward = mean_reward
+                    path = os.path.join(MODELS_DIR, f"{model_id}_best")
+                    model.save(path)
+                    print(f"[{model_id}] NEW BEST MEAN REWARD: Saved to {path}.zip")
+
+                # Reset current counter
+                stats.current_episode_reward = 0.0
+
+            if (model.replay_buffer.size() > LEARNING_STARTS and stats.step_count % TRAIN_FREQUENCY == 0):
+                if not stats.is_training:
+                    stats.is_training = True
+                    asyncio.create_task(run_training_background(model, model_id))
+
+            if stats.step_count % SAVE_FREQUENCY == 0:
+                save_path = os.path.join(MODELS_DIR, model_id)
+                model.save(save_path)
+                print(f"[{model_id}] Periodic Checkpoint Saved.")
+
             action_to_take, _ = model.predict(new_obs, deterministic=False)
-            await websocket.send_json({"action": action_to_take.tolist()})
+            await websocket.send_json({"action": action_to_take[0].tolist()})
 
     except WebSocketDisconnect:
         print("--- client disconnected ---")
+        save_path = os.path.join(MODELS_DIR, model_id)
+        model.save(save_path)
     except Exception as e:
         print(f"An error occurred: {e}")
 
@@ -138,6 +193,6 @@ if __name__ == "__main__":
     print(f"Action Dimension: {ACTION_DIM}")
     print(f"Server will start training after {LEARNING_STARTS} steps.")
     print(f"Listening on http://127.0.0.1:8000")
-    print(f"WebSocket on http://127.0.0.1:{PORT}/ws")
+    print(f"WebSocket on http://127.0.0.1:{PORT}/ws/<model_id>")
     
     uvicorn.run(app, host="127.0.0.1", port=PORT)
