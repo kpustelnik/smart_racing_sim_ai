@@ -36,8 +36,8 @@ app = FastAPI()
 # This allows the background training thread to talk to the async WebSocket
 class DataBridge:
     def __init__(self):
-        self.action_queue = queue.Queue(maxsize=1)
-        self.obs_queue = queue.Queue(maxsize=1)
+        self.action_queue = queue.Queue()
+        self.obs_queue = queue.Queue()
         self.connected = False
 
     def put_actions(self, actions):
@@ -129,12 +129,19 @@ def train_model(model_id: str):
 
     # 3. Start the standard SB3 loop
     # This will automatically call env.step(), buffer data, and train
-    try:
-        model.learn(total_timesteps=TOTAL_TIMESTEPS, log_interval=4)
-        model.save(os.path.join(MODELS_DIR, model_id))
-        print(f"[{model_id}] Training finished.")
-    except Exception as e:
-        print(f"[{model_id}] Training interrupted: {e}")
+    while True:
+        try:
+            print(f"[{model_id}] Starting Learning Block ({TOTAL_TIMESTEPS} steps)...")
+            model.learn(total_timesteps=TOTAL_TIMESTEPS, log_interval=4, reset_num_timesteps=False)
+            
+            # Save checkpoint
+            save_path = os.path.join(MODELS_DIR, model_id)
+            model.save(save_path)
+            print(f"[{model_id}] Block Finished & Saved. Re-initializing learning...")
+            
+        except Exception as e:
+            print(f"[{model_id}] Critical Training Error: {e}")
+            break 
 
 # --- WEBSOCKET ENDPOINT ---
 @app.websocket("/ws/{model_id}")
@@ -157,19 +164,42 @@ async def websocket_endpoint(websocket: WebSocket, model_id: str):
     # Start Training Thread (if not running)
     # We run this in a separate thread so it doesn't block the WebSocket/FastAPI
     train_thread = threading.Thread(target=train_model, args=(model_id,), daemon=True)
-    train_thread.start()
+    # active_threads = [t.name for t in threading.enumerate()]
+    thread_name = f"train_{model_id}"
+    
+    should_start_thread = True
+    for t in threading.enumerate():
+        if t.name == thread_name and t.is_alive():
+            should_start_thread = False
+            print(f"[{model_id}] Training thread already active. Reconnecting bridge.")
+            break
+
+    if should_start_thread:
+        train_thread = threading.Thread(target=train_model, args=(model_id,), name=thread_name, daemon=True)
+        train_thread.start()
 
     try:
         while True:
             raw_data = await websocket.receive_json()
 
-            for i, item in enumerate(raw_data):
-                batch_obs[i] = item['current_observation']
-                batch_rewards[i] = item['reward']
-                batch_dones[i] = item['terminated']
+            data_list = raw_data if isinstance(raw_data, list) else [raw_data]
+            count = len(data_list)
             
-            # Send to Bridge (Wake up the training thread)
-            # We must copy arrays to prevent reference issues if overwritten quickly
+            for i in range(NUM_ENVS):
+                item = data_list[i] if i < count else None
+                
+                if item is None or item == {}:
+                    batch_obs[i] = np.zeros(STATE_DIM)
+                    batch_rewards[i] = 0.0
+                    batch_dones[i] = True 
+                else:
+                    try:
+                        batch_obs[i] = item['current_observation']
+                        batch_rewards[i] = item['reward']
+                        batch_dones[i] = item['terminated']
+                    except:
+                        batch_dones[i] = True
+
             bridge.put_observations({
                 'obs': batch_obs.copy(),
                 'rewards': batch_rewards.copy(),
@@ -177,12 +207,8 @@ async def websocket_endpoint(websocket: WebSocket, model_id: str):
                 'infos': [{} for _ in range(NUM_ENVS)]
             })
             
-            # Wait for Actions from Training Thread
-            # We poll the queue non-blockingly or using asyncio
             actions = None
             while actions is None:
-                # We check the queue in a loop with a tiny sleep to allow context switching
-                # This bridges the Sync Thread -> Async Loop gap
                 if not bridge.action_queue.empty():
                     actions = bridge.action_queue.get()
                 else:
