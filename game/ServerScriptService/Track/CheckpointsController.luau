@@ -45,7 +45,7 @@ Part.CanQuery = false
 Part.Parent = game.Workspace
 
 CheckpointsController.GetTrackDistanceState = function (Position: Vector3): (number, number)
-  if #CheckpointsController.Checkpoints == 0 then return 0 end
+  if #CheckpointsController.Checkpoints == 0 then return 0, 0 end
 
   local minDistanceToRay: number = math.huge
   local minDistanceCheckpoint: number = 0
