@@ -11,7 +11,8 @@ from typing import List, Dict, Optional, Any
 # RL Libraries
 import gymnasium as gym
 from gymnasium import spaces
-from stable_baselines3 import SAC
+# CHANGED: Import PPO instead of SAC
+from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import VecNormalize, VecEnv
 from stable_baselines3.common.callbacks import CheckpointCallback
 
@@ -20,20 +21,21 @@ from pettingzoo import ParallelEnv
 import supersuit as ss
 
 # --- CONSTANTS ---
-RAYCASTS = 10
+RAYCASTS = 8
 NITRO_FUEL_STATE = 1
 VELOCITY_STATE = 1 
 PREV_ACTIONS = 0 
 
-BASE_STATE_DIM = RAYCASTS + NITRO_FUEL_STATE + PREV_ACTIONS + VELOCITY_STATE # 12
+BASE_STATE_DIM = RAYCASTS + NITRO_FUEL_STATE + PREV_ACTIONS + VELOCITY_STATE 
 STACK_SIZE = 4
 ACTION_DIM = 3
 NUM_AGENTS = 5
 
-# --- HYPERPARAMS ---
-TOTAL_TIMESTEPS = 200_000 
+# --- HYPERPARAMS (PPO Specific) ---
+TOTAL_TIMESTEPS = 500_000 
 LEARNING_RATE = 0.0003
-BATCH_SIZE = 512
+BATCH_SIZE = 64        # Smaller batch size for PPO updates
+N_STEPS = 1024         # Steps to collect per agent before updating
 MODELS_DIR = "saved_models"
 LOGS_DIR = "sb3_logs"
 
@@ -44,13 +46,9 @@ app = FastAPI()
 
 # --- COMPATIBILITY ADAPTER ---
 class GymnasiumToSB3Adapter(VecEnv):
-    """
-    A manual adapter to convert a Gymnasium VectorEnv (from SuperSuit)
-    into a Stable Baselines3 VecEnv.
-    """
     def __init__(self, venv):
         self.venv = venv
-        # Initialize SB3 VecEnv with correct metadata
+        self.render_mode = getattr(venv, "render_mode", None)
         super().__init__(
             num_envs=venv.num_envs,
             observation_space=venv.observation_space,
@@ -68,7 +66,6 @@ class GymnasiumToSB3Adapter(VecEnv):
         obs, reward, term, trunc, info = self.venv.step_wait()
         dones = term | trunc
         
-        # Convert Gymnasium Info Dict-of-Arrays -> SB3 List-of-Dicts
         if isinstance(info, dict):
             new_infos = []
             keys = info.keys()
@@ -104,6 +101,12 @@ class DataBridge:
         self.action_queue = queue.Queue()
         self.obs_queue = queue.Queue()
 
+    def clear(self):
+        with self.action_queue.mutex:
+            self.action_queue.queue.clear()
+        with self.obs_queue.mutex:
+            self.obs_queue.queue.clear()
+
     def put_actions(self, actions):
         with self.action_queue.mutex:
             self.action_queue.queue.clear()
@@ -130,9 +133,7 @@ class RobloxRacingEnv(ParallelEnv):
     metadata = {"render_modes": ["human"], "name": "roblox_racing_v1"}
 
     def __init__(self, bridge: DataBridge):
-        # FIX: Explicitly set render_mode to satisfy Gymnasium/SuperSuit
         self.render_mode = None 
-        
         self.bridge = bridge
         self.possible_agents = [f"car_{i}" for i in range(bridge.num_agents)]
         self.agents = self.possible_agents[:]
@@ -166,7 +167,6 @@ class RobloxRacingEnv(ParallelEnv):
                 ordered_actions[i] = actions[agent]
         
         self.bridge.put_actions(ordered_actions)
-        
         data = self.bridge.get_latest_observation()
         
         observations = {}
@@ -184,36 +184,42 @@ class RobloxRacingEnv(ParallelEnv):
         
         return observations, rewards, terminations, truncations, infos
 
-# --- TRAINING THREAD ---
+# --- TRAINING THREAD (PPO VERSION) ---
 def train_model(model_id: str):
-    print(f"[{model_id}] Training thread started.")
+    print(f"[{model_id}] Training thread started (PPO).")
     bridge = bridges[model_id]
     
     # 1. Base Env
     env = RobloxRacingEnv(bridge)
     
-    # 2. SuperSuit Wrappers
+    # 2. Wrappers
     env = ss.frame_stack_v1(env, stack_size=STACK_SIZE)
     gym_vec_env = ss.pettingzoo_env_to_vec_env_v1(env)
-    
-    # 3. MANUAL ADAPTER
     env = GymnasiumToSB3Adapter(gym_vec_env)
-    
-    # 4. Normalize
     env = VecNormalize(env, norm_obs=True, norm_reward=True, clip_obs=10.0)
 
     model_path = os.path.join(MODELS_DIR, f"{model_id}.zip")
     
+    # PPO CONFIGURATION
+    # ent_coef=0.01: Forces exploration (prevents early convergence to crashing)
+    # n_steps=1024: Collects 1024 steps per car before updating weights
+    policy_kwargs = dict(net_arch=[256, 256])
+    
     if os.path.exists(model_path):
         try:
             print(f"[{model_id}] Loading existing model...")
-            model = SAC.load(model_path, env=env)
+            model = PPO.load(model_path, env=env)
+            model.ent_coef = 0.01 # Force exploration on load
         except Exception as e:
-            print(f"[{model_id}] Load failed: {e}. Creating new.")
-            model = SAC("MlpPolicy", env, verbose=1, learning_rate=LEARNING_RATE, batch_size=BATCH_SIZE, ent_coef="auto")
+            print(f"[{model_id}] Load failed: {e}. Creating new PPO.")
+            model = PPO("MlpPolicy", env, verbose=1, learning_rate=LEARNING_RATE, 
+                        n_steps=N_STEPS, batch_size=BATCH_SIZE, ent_coef=0.01, 
+                        policy_kwargs=policy_kwargs)
     else:
-        print(f"[{model_id}] Creating new SAC model.")
-        model = SAC("MlpPolicy", env, verbose=1, learning_rate=LEARNING_RATE, batch_size=BATCH_SIZE, ent_coef="auto")
+        print(f"[{model_id}] Creating new PPO model.")
+        model = PPO("MlpPolicy", env, verbose=1, learning_rate=LEARNING_RATE, 
+                    n_steps=N_STEPS, batch_size=BATCH_SIZE, ent_coef=0.01, 
+                    policy_kwargs=policy_kwargs)
 
     checkpoint_callback = CheckpointCallback(save_freq=10000, save_path=MODELS_DIR, name_prefix=model_id)
     
@@ -233,6 +239,8 @@ async def websocket_endpoint(websocket: WebSocket, model_id: str):
     if model_id not in bridges: bridges[model_id] = DataBridge(num_agents=NUM_AGENTS)
     bridge = bridges[model_id]
     
+    bridge.clear()
+    
     thread_name = f"train_{model_id}"
     if not any(t.name == thread_name and t.is_alive() for t in threading.enumerate()):
         threading.Thread(target=train_model, args=(model_id,), name=thread_name, daemon=True).start()
@@ -241,13 +249,13 @@ async def websocket_endpoint(websocket: WebSocket, model_id: str):
     batch_rewards = np.zeros((NUM_AGENTS,), dtype=np.float32)
     batch_terms = np.zeros((NUM_AGENTS,), dtype=bool)
     batch_truncs = np.zeros((NUM_AGENTS,), dtype=bool)
+    no_op_action = np.zeros((NUM_AGENTS, ACTION_DIM), dtype=np.float32).tolist()
 
     try:
         while True:
             raw_data = await websocket.receive_json()
             data_list = raw_data if isinstance(raw_data, list) else [raw_data]
             
-            # Reset buffers
             batch_obs.fill(0); batch_rewards.fill(0); batch_terms.fill(False); batch_truncs.fill(False)
             
             for i in range(NUM_AGENTS):
@@ -268,10 +276,12 @@ async def websocket_endpoint(websocket: WebSocket, model_id: str):
                 actions = bridge.action_queue.get()
                 await websocket.send_json({"actions": actions.tolist()})
             else:
-                await websocket.send_json({"actions": []})
+                await websocket.send_json({"actions": no_op_action})
 
-    except (WebSocketDisconnect, Exception) as e:
-        print(f"[{model_id}] Connection closed: {e}")
+    except WebSocketDisconnect:
+        print(f"[{model_id}] Client disconnected.")
+    except Exception as e:
+        print(f"[{model_id}] Critical Connection Error: {e}")
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
