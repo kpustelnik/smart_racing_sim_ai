@@ -95,7 +95,7 @@ CarsController.GetRaycasts = function (car: Model): { number }?
     local raycastResult: RaycastResult<BasePart>? = Workspace:Raycast(startPos, targetPos - startPos, params)
 
     local hitPosition: Vector3 = if raycastResult ~= nil then raycastResult.Position else targetPos
-
+    
     local part = Instance.new("Part")
     part.CanCollide = false
     part.Anchored = true
@@ -106,10 +106,10 @@ CarsController.GetRaycasts = function (car: Model): { number }?
     part.Parent = car
     part.CFrame = CFrame.lookAt((hitPosition + startPos) / 2, hitPosition)
     part.Transparency = 0.5
-    task.defer(function() task.wait(); part:Destroy() end)
+    task.defer(function(): () task.wait(); part:Destroy() end)
 
     local Distance: number = (hitPosition - startPos).Magnitude
-    table.insert(Result, Distance)
+    table.insert(Result, Distance / rc.Direction.Magnitude)
     local Dot: number = 1
     if raycastResult ~= nil then Dot = (targetPos - startPos).Unit:Dot(raycastResult.Normal) end
     table.insert(Result, Dot)
