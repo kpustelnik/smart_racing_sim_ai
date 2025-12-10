@@ -5,25 +5,35 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 import threading
 import queue
 import os
-from typing import List, Dict, Optional, Any, Union
+import shutil
+from typing import List, Dict, Optional, Any
 
-from stable_baselines3 import SAC
-from stable_baselines3.common.vec_env import VecEnv
-from stable_baselines3.common.logger import configure
+# RL Libraries
+import gymnasium as gym
 from gymnasium import spaces
+from stable_baselines3 import SAC
+from stable_baselines3.common.vec_env import VecNormalize, VecEnv
+from stable_baselines3.common.callbacks import CheckpointCallback
+
+# PettingZoo & SuperSuit
+from pettingzoo import ParallelEnv
+import supersuit as ss
 
 # --- CONSTANTS ---
 RAYCASTS = 10
 NITRO_FUEL_STATE = 1
+VELOCITY_STATE = 1 
 PREV_ACTIONS = 0 
-STATE_DIM = RAYCASTS + NITRO_FUEL_STATE + PREV_ACTIONS
+
+BASE_STATE_DIM = RAYCASTS + NITRO_FUEL_STATE + PREV_ACTIONS + VELOCITY_STATE # 12
+STACK_SIZE = 4
 ACTION_DIM = 3
-NUM_ENVS = 5
+NUM_AGENTS = 5
 
 # --- HYPERPARAMS ---
-TOTAL_TIMESTEPS = 1_000_000 
+TOTAL_TIMESTEPS = 200_000 
 LEARNING_RATE = 0.0003
-BATCH_SIZE = 256
+BATCH_SIZE = 512
 MODELS_DIR = "saved_models"
 LOGS_DIR = "sb3_logs"
 
@@ -32,195 +42,236 @@ os.makedirs(LOGS_DIR, exist_ok=True)
 
 app = FastAPI()
 
+# --- COMPATIBILITY ADAPTER ---
+class GymnasiumToSB3Adapter(VecEnv):
+    """
+    A manual adapter to convert a Gymnasium VectorEnv (from SuperSuit)
+    into a Stable Baselines3 VecEnv.
+    """
+    def __init__(self, venv):
+        self.venv = venv
+        # Initialize SB3 VecEnv with correct metadata
+        super().__init__(
+            num_envs=venv.num_envs,
+            observation_space=venv.observation_space,
+            action_space=venv.action_space
+        )
+
+    def reset(self):
+        obs, _ = self.venv.reset()
+        return obs
+
+    def step_async(self, actions):
+        self.venv.step_async(actions)
+
+    def step_wait(self):
+        obs, reward, term, trunc, info = self.venv.step_wait()
+        dones = term | trunc
+        
+        # Convert Gymnasium Info Dict-of-Arrays -> SB3 List-of-Dicts
+        if isinstance(info, dict):
+            new_infos = []
+            keys = info.keys()
+            for i in range(self.num_envs):
+                sub_info = {k: info[k][i] for k in keys}
+                if dones[i]:
+                    if "terminal_observation" not in sub_info and "final_observation" in sub_info:
+                        sub_info["terminal_observation"] = sub_info["final_observation"]
+                new_infos.append(sub_info)
+            info = new_infos
+            
+        return obs, reward, dones, info
+
+    def close(self):
+        self.venv.close()
+    
+    def get_attr(self, attr_name, indices=None):
+        return self.venv.get_attr(attr_name, indices)
+
+    def set_attr(self, attr_name, value, indices=None):
+        self.venv.set_attr(attr_name, value, indices)
+
+    def env_method(self, method_name, *args, **kwargs):
+        return self.venv.env_method(method_name, *args, **kwargs)
+        
+    def env_is_wrapped(self, wrapper_class, indices=None):
+        return [False] * self.num_envs
+
 # --- BRIDGE MECHANISM ---
-# This allows the background training thread to talk to the async WebSocket
 class DataBridge:
-    def __init__(self):
+    def __init__(self, num_agents):
+        self.num_agents = num_agents
         self.action_queue = queue.Queue()
         self.obs_queue = queue.Queue()
-        self.connected = False
 
     def put_actions(self, actions):
+        with self.action_queue.mutex:
+            self.action_queue.queue.clear()
         self.action_queue.put(actions)
-
-    def get_actions(self):
-        if not self.action_queue.empty():
-            return self.action_queue.get()
-        return None
 
     def put_observations(self, obs_data):
         self.obs_queue.put(obs_data)
 
-    def get_observations(self):
-        return self.obs_queue.get()
+    def get_latest_observation(self):
+        data = None
+        try:
+            while True:
+                data = self.obs_queue.get_nowait()
+        except queue.Empty:
+            pass
+        if data is None:
+            data = self.obs_queue.get()
+        return data
 
 bridges: Dict[str, DataBridge] = {}
 
-# --- CUSTOM VEC ENV ---
-class ExternalVecEnv(VecEnv):
+# --- PETTINGZOO PARALLEL ENVIRONMENT ---
+class RobloxRacingEnv(ParallelEnv):
+    metadata = {"render_modes": ["human"], "name": "roblox_racing_v1"}
+
     def __init__(self, bridge: DataBridge):
+        # FIX: Explicitly set render_mode to satisfy Gymnasium/SuperSuit
+        self.render_mode = None 
+        
         self.bridge = bridge
+        self.possible_agents = [f"car_{i}" for i in range(bridge.num_agents)]
+        self.agents = self.possible_agents[:]
         
-        action_space = spaces.Box(low=-1.0, high=1.0, shape=(ACTION_DIM,), dtype=np.float32)
-        observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(STATE_DIM,), dtype=np.float32)
+        self.observation_space = lambda agent: spaces.Box(
+            low=-np.inf, high=np.inf, shape=(BASE_STATE_DIM,), dtype=np.float32
+        )
+        self.action_space = lambda agent: spaces.Box(
+            low=-1.0, high=1.0, shape=(ACTION_DIM,), dtype=np.float32
+        )
+
+        self.observation_spaces = {agent: self.observation_space(agent) for agent in self.possible_agents}
+        self.action_spaces = {agent: self.action_space(agent) for agent in self.possible_agents}
+
+    def reset(self, seed=None, options=None):
+        self.agents = self.possible_agents[:]
+        data = self.bridge.get_latest_observation()
+        raw_obs = data['obs']
         
-        super().__init__(NUM_ENVS, observation_space, action_space)
+        observations = {}
+        infos = {}
+        for idx, agent in enumerate(self.agents):
+            observations[agent] = raw_obs[idx]
+            infos[agent] = {}
+        return observations, infos
 
-    def step_async(self, actions):
-        self.bridge.put_actions(actions)
-
-    def step_wait(self):
-        data = self.bridge.get_observations()
+    def step(self, actions):
+        ordered_actions = np.zeros((self.bridge.num_agents, ACTION_DIM), dtype=np.float32)
+        for i, agent in enumerate(self.possible_agents):
+            if agent in actions:
+                ordered_actions[i] = actions[agent]
         
-        obs = data['obs']
-        rewards = data['rewards']
-        dones = data['dones']
-        infos = data['infos']
+        self.bridge.put_actions(ordered_actions)
         
-        return obs, rewards, dones, infos
+        data = self.bridge.get_latest_observation()
+        
+        observations = {}
+        rewards = {}
+        terminations = {}
+        truncations = {}
+        infos = {}
 
-    def reset(self):
-        print("Waiting for initial observation from Client...")
-        data = self.bridge.get_observations()
-        return data['obs']
-
-    def close(self):
-        pass
-
-    def get_attr(self, attr_name: str, indices: Any = None) -> List[Any]:
-        return [None] * self.num_envs
-
-    def set_attr(self, attr_name: str, value: Any, indices: Any = None) -> None:
-        pass
-
-    def env_method(self, method_name: str, *method_args, **method_kwargs) -> List[Any]:
-        return [None] * self.num_envs
-
-    def env_is_wrapped(self, wrapper_class: Any, indices: Any = None) -> List[bool]:
-        return [False] * self.num_envs
+        for idx, agent in enumerate(self.possible_agents):
+            observations[agent] = data['obs'][idx]
+            rewards[agent] = float(data['rewards'][idx])
+            terminations[agent] = bool(data['terms'][idx])
+            truncations[agent] = bool(data['truncs'][idx])
+            infos[agent] = {}
+        
+        return observations, rewards, terminations, truncations, infos
 
 # --- TRAINING THREAD ---
 def train_model(model_id: str):
     print(f"[{model_id}] Training thread started.")
     bridge = bridges[model_id]
     
-    # 1. Create the Custom Env
-    env = ExternalVecEnv(bridge)
+    # 1. Base Env
+    env = RobloxRacingEnv(bridge)
     
-    # 2. Load or Create Model
+    # 2. SuperSuit Wrappers
+    env = ss.frame_stack_v1(env, stack_size=STACK_SIZE)
+    gym_vec_env = ss.pettingzoo_env_to_vec_env_v1(env)
+    
+    # 3. MANUAL ADAPTER
+    env = GymnasiumToSB3Adapter(gym_vec_env)
+    
+    # 4. Normalize
+    env = VecNormalize(env, norm_obs=True, norm_reward=True, clip_obs=10.0)
+
     model_path = os.path.join(MODELS_DIR, f"{model_id}.zip")
     
     if os.path.exists(model_path):
-        print(f"[{model_id}] Loading existing model.")
-        model = SAC.load(model_path, env=env)
+        try:
+            print(f"[{model_id}] Loading existing model...")
+            model = SAC.load(model_path, env=env)
+        except Exception as e:
+            print(f"[{model_id}] Load failed: {e}. Creating new.")
+            model = SAC("MlpPolicy", env, verbose=1, learning_rate=LEARNING_RATE, batch_size=BATCH_SIZE, ent_coef="auto")
     else:
         print(f"[{model_id}] Creating new SAC model.")
-        model = SAC(
-            "MlpPolicy",
-            env,
-            verbose=1,
-            learning_rate=LEARNING_RATE,
-            batch_size=BATCH_SIZE,
-            buffer_size=100_000,
-            learning_starts=1000,
-            tensorboard_log=LOGS_DIR,
-            device="auto"
-        )
+        model = SAC("MlpPolicy", env, verbose=1, learning_rate=LEARNING_RATE, batch_size=BATCH_SIZE, ent_coef="auto")
 
-    # 3. Start the standard SB3 loop
-    # This will automatically call env.step(), buffer data, and train
+    checkpoint_callback = CheckpointCallback(save_freq=10000, save_path=MODELS_DIR, name_prefix=model_id)
+    
     while True:
         try:
-            print(f"[{model_id}] Starting Learning Block ({TOTAL_TIMESTEPS} steps)...")
-            model.learn(total_timesteps=TOTAL_TIMESTEPS, log_interval=4, reset_num_timesteps=False)
-            
-            # Save checkpoint
-            save_path = os.path.join(MODELS_DIR, model_id)
-            model.save(save_path)
-            print(f"[{model_id}] Block Finished & Saved. Re-initializing learning...")
-            
+            model.learn(total_timesteps=TOTAL_TIMESTEPS, callback=checkpoint_callback, reset_num_timesteps=False)
+            model.save(os.path.join(MODELS_DIR, model_id))
+            print(f"[{model_id}] Saved model.")
         except Exception as e:
-            print(f"[{model_id}] Critical Training Error: {e}")
-            break 
+            print(f"[{model_id}] Training Error: {e}")
+            break
 
 # --- WEBSOCKET ENDPOINT ---
 @app.websocket("/ws/{model_id}")
 async def websocket_endpoint(websocket: WebSocket, model_id: str):
     await websocket.accept()
-    print(f"--- Client connected: {model_id} ---")
-    
-    # Initialize Bridge
-    if model_id not in bridges:
-        bridges[model_id] = DataBridge()
-    
+    if model_id not in bridges: bridges[model_id] = DataBridge(num_agents=NUM_AGENTS)
     bridge = bridges[model_id]
-    bridge.connected = True
     
-    # Pre-allocate arrays for receiving data 
-    batch_obs = np.zeros((NUM_ENVS, STATE_DIM), dtype=np.float32)
-    batch_rewards = np.zeros((NUM_ENVS,), dtype=np.float32)
-    batch_dones = np.zeros((NUM_ENVS,), dtype=bool)
-    
-    # Start Training Thread (if not running)
-    # We run this in a separate thread so it doesn't block the WebSocket/FastAPI
-    train_thread = threading.Thread(target=train_model, args=(model_id,), daemon=True)
-    # active_threads = [t.name for t in threading.enumerate()]
     thread_name = f"train_{model_id}"
-    
-    should_start_thread = True
-    for t in threading.enumerate():
-        if t.name == thread_name and t.is_alive():
-            should_start_thread = False
-            print(f"[{model_id}] Training thread already active. Reconnecting bridge.")
-            break
+    if not any(t.name == thread_name and t.is_alive() for t in threading.enumerate()):
+        threading.Thread(target=train_model, args=(model_id,), name=thread_name, daemon=True).start()
 
-    if should_start_thread:
-        train_thread = threading.Thread(target=train_model, args=(model_id,), name=thread_name, daemon=True)
-        train_thread.start()
+    batch_obs = np.zeros((NUM_AGENTS, BASE_STATE_DIM), dtype=np.float32)
+    batch_rewards = np.zeros((NUM_AGENTS,), dtype=np.float32)
+    batch_terms = np.zeros((NUM_AGENTS,), dtype=bool)
+    batch_truncs = np.zeros((NUM_AGENTS,), dtype=bool)
 
     try:
         while True:
             raw_data = await websocket.receive_json()
-
             data_list = raw_data if isinstance(raw_data, list) else [raw_data]
-            count = len(data_list)
             
-            for i in range(NUM_ENVS):
-                item = data_list[i] if i < count else None
-                
-                if item is None or item == {}:
-                    batch_obs[i] = np.zeros(STATE_DIM)
-                    batch_rewards[i] = 0.0
-                    batch_dones[i] = True 
-                else:
+            # Reset buffers
+            batch_obs.fill(0); batch_rewards.fill(0); batch_terms.fill(False); batch_truncs.fill(False)
+            
+            for i in range(NUM_AGENTS):
+                item = data_list[i] if i < len(data_list) else None
+                if item:
                     try:
-                        batch_obs[i] = item['current_observation']
-                        batch_rewards[i] = item['reward']
-                        batch_dones[i] = item['terminated']
-                    except:
-                        batch_dones[i] = True
-
-            bridge.put_observations({
-                'obs': batch_obs.copy(),
-                'rewards': batch_rewards.copy(),
-                'dones': batch_dones.copy(),
-                'infos': [{} for _ in range(NUM_ENVS)]
-            })
-            
-            actions = None
-            while actions is None:
-                if not bridge.action_queue.empty():
-                    actions = bridge.action_queue.get()
+                        batch_obs[i] = np.array(item.get('current_observation', []), dtype=np.float32)
+                        batch_rewards[i] = float(item.get('reward', 0.0))
+                        batch_terms[i] = bool(item.get('terminated', False))
+                        batch_truncs[i] = bool(item.get('truncated', False))
+                    except: batch_terms[i] = True
                 else:
-                    await asyncio.sleep(0.001)
+                    batch_terms[i] = True
 
-            await websocket.send_json({"actions": actions.tolist()})
+            bridge.put_observations({'obs': batch_obs, 'rewards': batch_rewards, 'terms': batch_terms, 'truncs': batch_truncs})
+            
+            if not bridge.action_queue.empty():
+                actions = bridge.action_queue.get()
+                await websocket.send_json({"actions": actions.tolist()})
+            else:
+                await websocket.send_json({"actions": []})
 
-    except WebSocketDisconnect:
-        print(f"[{model_id}] Client disconnected.")
-    except Exception as e:
-        print(f"Error: {e}")
+    except (WebSocketDisconnect, Exception) as e:
+        print(f"[{model_id}] Connection closed: {e}")
 
 if __name__ == "__main__":
-    print(f"Starting Dedicated SB3 Server (Expected Agents: {NUM_ENVS})")
     uvicorn.run(app, host="0.0.0.0", port=8000)

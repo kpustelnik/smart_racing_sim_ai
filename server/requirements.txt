@@ -3,3 +3,7 @@ torch
 fastapi
 uvicorn
 uvicorn[standard]
+pettingzoo
+supersuit
+gymnasium
+shimmy
