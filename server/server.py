@@ -21,7 +21,7 @@ from pettingzoo import ParallelEnv
 import supersuit as ss
 
 # --- CONSTANTS ---
-RAYCASTS = 16
+RAYCASTS = 17
 NITRO_FUEL_STATE = 1
 VELOCITY_STATE = 1 
 PREV_ACTIONS = 0 

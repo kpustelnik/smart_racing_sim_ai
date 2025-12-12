@@ -9,7 +9,7 @@ local TrackWalls = Workspace:WaitForChild('Track'):WaitForChild('Walls')
 local CheckpointsController = require(script.Parent:WaitForChild('Track'):WaitForChild('CheckpointsController'))
 local CarsController = require(script.Parent:WaitForChild('Track'):WaitForChild('CarsController'))
 
-local modelId: string = 'multi_car'
+local modelId: string = 'multi_car_orient'
 local carModel: string = 'Car'
 local websocketUrl: string = `ws://localhost:8000/ws/{modelId}`
 local websocketClient: WebStreamClient = HttpService:CreateWebStreamClient(Enum.WebStreamClientType.WebSocket, {
@@ -103,7 +103,9 @@ game:GetService('RunService').Heartbeat:Connect(function (dt: number): ()
     local cc = CarData[CarNumber]
     if cc == nil then continue end
     
-    local trackProgress: number, checkpoint: number = CheckpointsController.GetTrackProgressState(Car:GetPivot().Position)
+    local carPosition = Car:GetPivot().Position
+    local carOrientation: Vector3 = Car:GetPivot().LookVector
+    local trackProgress: number, checkpoint: number, trackOrientation: number? = CheckpointsController.GetTrackProgressState(carPosition, carOrientation)
     if checkpoint == cc.lastCheckpoint + 1 or (cc.lastCheckpoint == #CheckpointsController.Checkpoints and checkpoint == 1) then
       cc.lastCheckpoint = checkpoint
       if checkpoint == 1 then
@@ -131,6 +133,9 @@ game:GetService('RunService').Heartbeat:Connect(function (dt: number): ()
     if rcResults then
       table.insert(rcResults, nitroStatus)
       table.insert(rcResults, math.clamp(velocityStatus / maxVelocity, -1, 1))
+      table.insert(rcResults,
+        if trackOrientation ~= nil then trackOrientation / math.pi else 0
+      )
     end
 
     local curThrottle: number = cc.carInputs:GetAttribute('throttleInput') :: any
