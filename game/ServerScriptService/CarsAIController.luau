@@ -135,7 +135,7 @@ game:GetService('RunService').Heartbeat:Connect(function (dt: number): ()
       table.insert(rcResults, math.clamp(velocityStatus / maxVelocity, -1, 1))
       
       local realOrientation: number = if trackOrientation ~= nil then trackOrientation / math.pi else 0
-      local isReverse: number = 1 if realOrientation > 0.5 or realOrientation < -0.5 else 0;
+      local isReverse: number = if realOrientation > 0.5 or realOrientation < -0.5 then 1 else 0
       table.insert(rcResults, isReverse)
     end
 
