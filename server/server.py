@@ -21,7 +21,7 @@ from pettingzoo import ParallelEnv
 import supersuit as ss
 
 # --- CONSTANTS ---
-RAYCASTS = 8
+RAYCASTS = 16
 NITRO_FUEL_STATE = 1
 VELOCITY_STATE = 1 
 PREV_ACTIONS = 0 
@@ -196,7 +196,6 @@ def train_model(model_id: str):
     env = ss.frame_stack_v1(env, stack_size=STACK_SIZE)
     gym_vec_env = ss.pettingzoo_env_to_vec_env_v1(env)
     env = GymnasiumToSB3Adapter(gym_vec_env)
-    env = VecNormalize(env, norm_obs=True, norm_reward=True, clip_obs=10.0)
 
     model_path = os.path.join(MODELS_DIR, f"{model_id}.zip")
     
@@ -208,18 +207,18 @@ def train_model(model_id: str):
     if os.path.exists(model_path):
         try:
             print(f"[{model_id}] Loading existing model...")
-            model = PPO.load(model_path, env=env)
-            model.ent_coef = 0.01 # Force exploration on load
+            model = PPO.load(model_path, env=env, device="cpu")
+            #model.ent_coef = 0.01 # Force exploration on load
         except Exception as e:
             print(f"[{model_id}] Load failed: {e}. Creating new PPO.")
             model = PPO("MlpPolicy", env, verbose=1, learning_rate=LEARNING_RATE, 
                         n_steps=N_STEPS, batch_size=BATCH_SIZE, ent_coef=0.01, 
-                        policy_kwargs=policy_kwargs)
+                        policy_kwargs=policy_kwargs, device="cpu")
     else:
         print(f"[{model_id}] Creating new PPO model.")
         model = PPO("MlpPolicy", env, verbose=1, learning_rate=LEARNING_RATE, 
                     n_steps=N_STEPS, batch_size=BATCH_SIZE, ent_coef=0.01, 
-                    policy_kwargs=policy_kwargs)
+                    policy_kwargs=policy_kwargs, device="cpu")
 
     checkpoint_callback = CheckpointCallback(save_freq=10000, save_path=MODELS_DIR, name_prefix=model_id)
     
