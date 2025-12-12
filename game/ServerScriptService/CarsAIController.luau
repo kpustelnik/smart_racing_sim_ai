@@ -2,14 +2,15 @@ local HttpService = game:GetService("HttpService")
 local Workspace = game:GetService('Workspace')
 local PhysicsService = game:GetService('PhysicsService')
 PhysicsService:RegisterCollisionGroup('CAR')
-PhysicsService:CollisionGroupSetCollidable('CAR', 'CAR', false)
+PhysicsService:CollisionGroupSetCollidable('CAR', 'CAR', true) -- Enable cars collisisons
 
 local TrackWalls = Workspace:WaitForChild('Track'):WaitForChild('Walls')
 
 local CheckpointsController = require(script.Parent:WaitForChild('Track'):WaitForChild('CheckpointsController'))
 local CarsController = require(script.Parent:WaitForChild('Track'):WaitForChild('CarsController'))
 
-local modelId: string = 'standard_car'
+local modelId: string = 'multi_car'
+local carModel: string = 'Car'
 local websocketUrl: string = `ws://localhost:8000/ws/{modelId}`
 local websocketClient: WebStreamClient = HttpService:CreateWebStreamClient(Enum.WebStreamClientType.WebSocket, {
   Url = websocketUrl
@@ -32,7 +33,8 @@ SpawnCar = function (CarNumber: number): ()
   CarCurrentConnections[CarNumber] = CurrentConnections
   CarData[CarNumber] = nil
 
-  local Car: Model = CarsController.SpawnCars({ 'Car' })[1]
+  local CarSpawn = {CarsController.GetSpawns()[CarNumber] }
+  local Car: Model = CarsController.SpawnCars({ carModel }, CarSpawn)[1]
   for _, v: Instance in pairs(Car:GetDescendants()) do
     if v:IsA('BasePart') then
       v.CollisionGroup = 'CAR'
@@ -135,19 +137,23 @@ game:GetService('RunService').Heartbeat:Connect(function (dt: number): ()
     local curSteering: number = cc.carInputs:GetAttribute('steeringInput') :: any
     local curNitro: number = cc.carInputs:GetAttribute('nitroInput') :: any
 
-    local progressToReport = totalProgress - cc.lastReportedProgress
+    local progressToReport: number = totalProgress - cc.lastReportedProgress
     cc.lastReportedProgress = totalProgress
 
-    progressToReport *= 50
+    progressToReport *= 1000
     if progressToReport < 0 then
-      progressToReport *= 5
+      progressToReport *= 20
+    end
+
+    if cc.terminationPending then
+      print(`Car {CarNumber} terminated. Total Progress: {totalProgress}`)
     end
 
     table.insert(dataToSend, {
       last_observation = cc.lastRc,
       current_observation = rcResults,
       last_action = {curThrottle, curSteering, curNitro},
-      reward = if not cc.terminationPending then progressToReport else -1000,
+      reward = if not cc.terminationPending then progressToReport else -10,
       terminated = cc.terminationPending
     })
   end

@@ -8,12 +8,22 @@ local CarScripts = script.Parent.Parent:WaitForChild('Car'):WaitForChild('CarScr
 
 local CarsController = {}
 
+CarsController.GetSpawns = function (): { BasePart }
+  local Spawns: { BasePart } = {}
+  for _, spawn: Instance in ipairs(CarsSpawnersFolder:GetChildren()) do
+    if spawn:IsA('BasePart') then
+      table.insert(Spawns, spawn)
+    end
+  end
+  return Spawns
+end
+
 CarsController.PickSpawns = function (count: number): { BasePart }
-  local r = Random.new()
-  local AllSpawns = CarsSpawnersFolder:GetChildren()
+  local r: Random = Random.new()
+  local AllSpawns: { BasePart } = CarsController.GetSpawns()
   local PickedSpawns: { BasePart } = {}
   for _ = 1, count do
-    local pickedSpawn: Instance?
+    local pickedSpawn: BasePart?
     while true do
       if #AllSpawns == 0 then
         pickedSpawn = nil
@@ -22,17 +32,17 @@ CarsController.PickSpawns = function (count: number): { BasePart }
       local pickedSpawnI = r:NextInteger(1, #AllSpawns)
       pickedSpawn = AllSpawns[pickedSpawnI]
       table.remove(AllSpawns, pickedSpawnI)
-      if pickedSpawn ~= nil and pickedSpawn:IsA('BasePart') then break end
+      if pickedSpawn ~= nil then break end
     end
 
-    if pickedSpawn == nil or not pickedSpawn:IsA('BasePart') then continue end
+    if pickedSpawn == nil then continue end
     table.insert(PickedSpawns, pickedSpawn)
   end
   return PickedSpawns
 end
 
-CarsController.SpawnCars = function (carTypes: { string }): { Model }
-  local carSpawns: { BasePart } = CarsController.PickSpawns(#carTypes)
+CarsController.SpawnCars = function (carTypes: { string }, presetCarSpawns: { BasePart }?): { Model }
+  local carSpawns: { BasePart } = if presetCarSpawns ~= nil then presetCarSpawns else CarsController.PickSpawns(#carTypes)
 
   local spawnedCars: { Model } = {}
   for i: number, carType: string in ipairs(carTypes) do
@@ -112,7 +122,7 @@ CarsController.GetRaycasts = function (car: Model): { number }?
     table.insert(Result, Distance / rc.Direction.Magnitude)
     local Dot: number = 1
     if raycastResult ~= nil then Dot = (targetPos - startPos).Unit:Dot(raycastResult.Normal) end
-    table.insert(Result, Dot)
+    if rc.IncludeNormal then table.insert(Result, Dot) end
   end
 
   return Result
