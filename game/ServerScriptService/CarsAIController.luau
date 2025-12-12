@@ -133,9 +133,10 @@ game:GetService('RunService').Heartbeat:Connect(function (dt: number): ()
     if rcResults then
       table.insert(rcResults, nitroStatus)
       table.insert(rcResults, math.clamp(velocityStatus / maxVelocity, -1, 1))
-      table.insert(rcResults,
-        if trackOrientation ~= nil then trackOrientation / math.pi else 0
-      )
+      
+      local realOrientation: number = if trackOrientation ~= nil then trackOrientation / math.pi else 0
+      local isReverse: number = 1 if realOrientation > 0.5 or realOrientation < -0.5 else 0;
+      table.insert(rcResults, isReverse)
     end
 
     local curThrottle: number = cc.carInputs:GetAttribute('throttleInput') :: any
