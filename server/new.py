@@ -18,6 +18,7 @@ from stable_baselines3.common.callbacks import CheckpointCallback
 from pettingzoo import ParallelEnv
 import supersuit as ss
 from supersuit.vector.sb3_vector_wrapper import SB3VecEnvWrapper
+import uuid
 
 # --- CONSTANTS ---
 RAYCASTS = 10
@@ -36,6 +37,9 @@ LEARNING_RATE = 0.0003
 BATCH_SIZE = 512
 MODELS_DIR = "saved_models"
 LOGS_DIR = "sb3_logs"
+
+BATCH_SIZE = 64        # Smaller batch size for PPO updates
+N_STEPS = 1024         # Steps to collect per agent before updating
 
 os.makedirs(MODELS_DIR, exist_ok=True)
 os.makedirs(LOGS_DIR, exist_ok=True)
@@ -70,8 +74,8 @@ class DataBridge:
             return None
 
     # Called by environment - thread
-    def send_command(self, command: str, data: dict = None):
-        payload = {"command": command, "data": data if data else {}}
+    def send_command(self, command: str, env_id: str, data: Optional[dict] = None):
+        payload = {"command": command, "data": data if data else {}, "envid": env_id}
         self.command_queue.put(payload)
 
     # Called by WebSocket Sender
@@ -93,8 +97,10 @@ class PettingZooWSEnv(ParallelEnv):
     metadata = {"render_modes": ["human"], "name": "petting_zoo_ws_env"}
     
     def __init__(self, bridge: DataBridge, num_agents: int):
+        self.env_id = str(uuid.uuid4()) # Unique ID for this env instance
+
         self.data_bridge = bridge
-        self.possible_agents = [f"car_{i}" for i in range(num_agents)]
+        self.possible_agents = [f"car_{i}_{self.env_id}" for i in range(num_agents)]
         self.agents = self.possible_agents[:]
         
         self.observation_spaces = {agent: self.observation_space(agent) for agent in self.possible_agents}
@@ -103,7 +109,7 @@ class PettingZooWSEnv(ParallelEnv):
         self.render_mode = None
         
         # Backend decides to spawn agents on INIT
-        self.data_bridge.send_command("SPAWN_AGENTS", {"agents": self.agents})
+        self.data_bridge.send_command("SPAWN_AGENTS", self.env_id, { "agents": self.agents})
 
     def observation_space(self, agent: str) -> gym.Space:
         return spaces.Box(
@@ -132,14 +138,14 @@ class PettingZooWSEnv(ParallelEnv):
         return data_map
     
     def close(self):
-        self.data_bridge.send_command("CLOSE")
+        self.data_bridge.send_command("CLOSE", self.env_id)
 
     # Reset environment and respawn/reset agents
     def reset(self, seed=None, options=None):
         self.data_bridge.clear_data()
         self.agents = self.possible_agents[:]
         
-        self.data_bridge.send_command("RESET", {"agents": self.agents})
+        self.data_bridge.send_command("RESET", self.env_id, {"agents": self.agents})
 
         # Wait for initial observation after reset
         obs = {}
@@ -159,7 +165,7 @@ class PettingZooWSEnv(ParallelEnv):
     # Send actions for all active agents
     def step(self, actions: dict[str, np.ndarray]):
         serializable_actions = {agent: acts.tolist() for agent, acts in actions.items()}
-        self.data_bridge.send_command("ACTION", serializable_actions)
+        self.data_bridge.send_command("ACTION", self.env_id, serializable_actions)
 
         # Await the response (observations + rewards)
         data_map = self.observe_all_data()
@@ -196,29 +202,56 @@ class PettingZooWSEnv(ParallelEnv):
 def train_model(model_id: str, bridge: DataBridge):
     print(f"[{model_id}] Training thread started.")
     
-    env = PettingZooWSEnv(bridge, num_agents=NUM_AGENTS)
-    env = ss.frame_stack_v1(env, stack_size=STACK_SIZE)
-    env = ss.pettingzoo_env_to_vec_env_v1(env)
-    env = SB3VecEnvWrapper(env)
+    env = []
+    for i in range(4):
+        env.append(PettingZooWSEnv(bridge, num_agents=NUM_AGENTS))
+    # Stack the frames to let model access temporal info
+    env = [ss.frame_stack_v1(x, stack_size=STACK_SIZE) for x in env]
+    env = [ss.pettingzoo_env_to_vec_env_v1(x) for x in env]
+    #env = ss.concat_vec_envs_v1(env, 4, num_cpus=0, base_class='stable_baselines3')
+    # env = SB3VecEnvWrapper(env)
+
+    def make_env(env_id):
+        # Definiujemy podzbiór agentów dla danej instancji
+        start = env_id * 5
+        agents_subset = [f"car_{i}" for i in range(start, start + 5)]
+        
+        env = PettingZooWSEnv(bridge, agents_list=agents_subset)
+        env = ss.frame_stack_v1(env, stack_size=STACK_SIZE)
+        # Konwertujemy na format Gymnasium (nie SB3 jeszcze!)
+        env = ss.pettingzoo_env_to_vec_env_v1(env)
+        return env
+
+    from gymnasium.vector import SyncVectorEnv
+    env = SyncVectorEnv([lambda i=i: make_env(i) for i in range(4)])
     env = VecNormalize(env, norm_obs=True, norm_reward=True, clip_obs=10.0)
 
     model_path = os.path.join(MODELS_DIR, f"{model_id}.zip")
     stats_path = os.path.join(MODELS_DIR, f"{model_id}_vecnormalize.pkl")
+    policy_kwargs = dict(net_arch=[256, 256])
     
     if os.path.exists(model_path):
         try:
             print(f"[{model_id}] Loading existing model...")
-            model = SAC.load(model_path, env=env)
+            #model = SAC.load(model_path, env=env)
+            model = PPO.load(model_path, env=env)
             # Load normalization stats if they exist
             if os.path.exists(stats_path):
                 print(f"[{model_id}] Loading normalization stats...")
                 env = VecNormalize.load(stats_path, env)
         except Exception as e:
             print(f"[{model_id}] Load failed: {e}. Creating new.")
-            model = SAC("MlpPolicy", env, verbose=1, learning_rate=LEARNING_RATE, batch_size=BATCH_SIZE, ent_coef="auto")
+            #model = SAC("MlpPolicy", env, verbose=1, learning_rate=LEARNING_RATE, batch_size=BATCH_SIZE, ent_coef="auto")
+            model = PPO("MlpPolicy", env, verbose=1, learning_rate=LEARNING_RATE, 
+                        n_steps=N_STEPS, batch_size=BATCH_SIZE, ent_coef=0.01, 
+                        policy_kwargs=policy_kwargs, device="cpu")
     else:
-        print(f"[{model_id}] Creating new SAC model.")
-        model = SAC("MlpPolicy", env, verbose=1, learning_rate=LEARNING_RATE, batch_size=BATCH_SIZE, ent_coef="auto")
+        # print(f"[{model_id}] Creating new SAC model.")
+        print(f"[{model_id}] Creating new PPO model.")
+        #model = SAC("MlpPolicy", env, verbose=1, learning_rate=LEARNING_RATE, batch_size=BATCH_SIZE, ent_coef="auto")
+        model = PPO("MlpPolicy", env, verbose=1, learning_rate=LEARNING_RATE, 
+                    n_steps=N_STEPS, batch_size=BATCH_SIZE, ent_coef=0.01, 
+                    policy_kwargs=policy_kwargs, device="cpu")
 
     # Callback to save model periodically
     checkpoint_callback = CheckpointCallback(save_freq=10000, save_path=MODELS_DIR, name_prefix=model_id)
