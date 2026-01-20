@@ -44,6 +44,21 @@ N_STEPS = 1024         # Steps to collect per agent before updating
 os.makedirs(MODELS_DIR, exist_ok=True)
 os.makedirs(LOGS_DIR, exist_ok=True)
 
+from stable_baselines3.common.callbacks import BaseCallback
+
+class RobloxFreezeCallback(BaseCallback):
+    def __init__(self, verbose=0):
+        super().__init__(verbose)
+        print("[Callback] Initializing RobloxFreezeCallback.")
+
+    def _on_rollout_end(self) -> None:
+        print("Rollout end (Freeze)")
+
+    def _on_rollout_start(self) -> None:
+        print("Rollout start (Unfreeze)")
+        
+    def _on_step(self) -> bool:
+        return True
 
 # --- BRIDGE MECHANISM ---
 class DataBridge:
@@ -67,11 +82,16 @@ class DataBridge:
     # Called by environment - thread
     def get_latest_obs(self, agent: str):
         c_queue = self.get_agent_queue(agent)
+        latest_data = None
         try:
-            # Blocking get with timeout to prevent deadlock if something crashes
-            return c_queue.get(timeout=10) 
+            while True:
+                latest_data = c_queue.get_nowait()
         except queue.Empty:
-            return None
+            pass
+        # Wait for the data if its missing
+        if latest_data is None:
+            latest_data = c_queue.get(timeout=10)
+        return latest_data
 
     # Called by environment - thread
     def send_command(self, command: str, env_id: str, data: Optional[dict] = None):
@@ -96,11 +116,21 @@ class DataBridge:
 class PettingZooWSEnv(ParallelEnv):
     metadata = {"render_modes": ["human"], "name": "petting_zoo_ws_env"}
     
-    def __init__(self, bridge: DataBridge, num_agents: int):
-        self.env_id = str(uuid.uuid4()) # Unique ID for this env instance
+    def __init__(self, bridge: DataBridge, num_agents: int, num_venvs: int = 4):
+        self.venvs_id = []
+        for _ in range(num_venvs):
+            self.venvs_id.append(str(uuid.uuid4()))
 
         self.data_bridge = bridge
-        self.possible_agents = [f"car_{i}_{self.env_id}" for i in range(num_agents)]
+        self.possible_agents = []
+        self.agents_per_venv = {}
+        for venv_id in self.venvs_id:
+            agents_venv = []
+            for i in range(num_agents):
+                agent_id = f"car_{i}_env_{venv_id}"
+                self.possible_agents.append(agent_id)
+                agents_venv.append(agent_id)
+            self.agents_per_venv[venv_id] = agents_venv
         self.agents = self.possible_agents[:]
         
         self.observation_spaces = {agent: self.observation_space(agent) for agent in self.possible_agents}
@@ -109,7 +139,8 @@ class PettingZooWSEnv(ParallelEnv):
         self.render_mode = None
         
         # Backend decides to spawn agents on INIT
-        self.data_bridge.send_command("SPAWN_AGENTS", self.env_id, { "agents": self.agents})
+        for venv_id in self.venvs_id:
+            self.data_bridge.send_command("SPAWN_AGENTS", venv_id, { "agents": self.agents_per_venv[venv_id] })
 
     def observation_space(self, agent: str) -> gym.Space:
         return spaces.Box(
@@ -138,14 +169,16 @@ class PettingZooWSEnv(ParallelEnv):
         return data_map
     
     def close(self):
-        self.data_bridge.send_command("CLOSE", self.env_id)
+        for venv_id in self.venvs_id:
+            self.data_bridge.send_command("CLOSE", venv_id)
 
     # Reset environment and respawn/reset agents
     def reset(self, seed=None, options=None):
         self.data_bridge.clear_data()
         self.agents = self.possible_agents[:]
         
-        self.data_bridge.send_command("RESET", self.env_id, {"agents": self.agents})
+        for venv_id in self.venvs_id:
+            self.data_bridge.send_command("RESET", venv_id, {"agents": self.agents_per_venv[venv_id] })
 
         # Wait for initial observation after reset
         obs = {}
@@ -165,7 +198,9 @@ class PettingZooWSEnv(ParallelEnv):
     # Send actions for all active agents
     def step(self, actions: dict[str, np.ndarray]):
         serializable_actions = {agent: acts.tolist() for agent, acts in actions.items()}
-        self.data_bridge.send_command("ACTION", self.env_id, serializable_actions)
+        for venv_id in self.venvs_id:
+            serializable_actions_venv = {agent: serializable_actions[agent] for agent in self.agents_per_venv[venv_id] if agent in serializable_actions}
+            self.data_bridge.send_command("ACTION", venv_id, serializable_actions_venv)
 
         # Await the response (observations + rewards)
         data_map = self.observe_all_data()
@@ -202,39 +237,23 @@ class PettingZooWSEnv(ParallelEnv):
 def train_model(model_id: str, bridge: DataBridge):
     print(f"[{model_id}] Training thread started.")
     
-    env = []
-    for i in range(4):
-        env.append(PettingZooWSEnv(bridge, num_agents=NUM_AGENTS))
+    env = PettingZooWSEnv(bridge, num_agents=NUM_AGENTS)
     # Stack the frames to let model access temporal info
-    env = [ss.frame_stack_v1(x, stack_size=STACK_SIZE) for x in env]
-    env = [ss.pettingzoo_env_to_vec_env_v1(x) for x in env]
-    #env = ss.concat_vec_envs_v1(env, 4, num_cpus=0, base_class='stable_baselines3')
-    # env = SB3VecEnvWrapper(env)
-
-    def make_env(env_id):
-        # Definiujemy podzbiór agentów dla danej instancji
-        start = env_id * 5
-        agents_subset = [f"car_{i}" for i in range(start, start + 5)]
-        
-        env = PettingZooWSEnv(bridge, agents_list=agents_subset)
-        env = ss.frame_stack_v1(env, stack_size=STACK_SIZE)
-        # Konwertujemy na format Gymnasium (nie SB3 jeszcze!)
-        env = ss.pettingzoo_env_to_vec_env_v1(env)
-        return env
-
-    from gymnasium.vector import SyncVectorEnv
-    env = SyncVectorEnv([lambda i=i: make_env(i) for i in range(4)])
+    env = ss.frame_stack_v1(env, stack_size=STACK_SIZE)
+    env = ss.pettingzoo_env_to_vec_env_v1(env)
+    env = SB3VecEnvWrapper(env)
     env = VecNormalize(env, norm_obs=True, norm_reward=True, clip_obs=10.0)
 
     model_path = os.path.join(MODELS_DIR, f"{model_id}.zip")
     stats_path = os.path.join(MODELS_DIR, f"{model_id}_vecnormalize.pkl")
     policy_kwargs = dict(net_arch=[256, 256])
+
     
     if os.path.exists(model_path):
         try:
             print(f"[{model_id}] Loading existing model...")
             #model = SAC.load(model_path, env=env)
-            model = PPO.load(model_path, env=env)
+            model = PPO.load(model_path, env=env, device="cpu")
             # Load normalization stats if they exist
             if os.path.exists(stats_path):
                 print(f"[{model_id}] Loading normalization stats...")
@@ -254,10 +273,12 @@ def train_model(model_id: str, bridge: DataBridge):
                     policy_kwargs=policy_kwargs, device="cpu")
 
     # Callback to save model periodically
-    checkpoint_callback = CheckpointCallback(save_freq=10000, save_path=MODELS_DIR, name_prefix=model_id)
-    
+    checkpoint_callback = CheckpointCallback(save_freq=10000, save_path=MODELS_DIR, save_vecnormalize=True, name_prefix=model_id)
+    freeze_callback = RobloxFreezeCallback()
+
     try:
-        model.learn(total_timesteps=TOTAL_TIMESTEPS, callback=checkpoint_callback, reset_num_timesteps=False)
+        # Remove to stop learning the model
+        model.learn(total_timesteps=TOTAL_TIMESTEPS, callback=[checkpoint_callback, freeze_callback], reset_num_timesteps=False)
         
         # Save Model
         model.save(os.path.join(MODELS_DIR, model_id))
