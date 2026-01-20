@@ -17,3 +17,4 @@ sourcemap.json
 !.vscode/settings.template.md
 
 server/sb3_logs
+server/saved_models
