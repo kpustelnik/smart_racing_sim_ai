@@ -144,7 +144,7 @@ class SACTrainer(ModelTrainer):
         "device": "cpu",
     }
     
-    def create_model(self, env: Any) -> SAC:
+    def create_model(self, env: Any, tensorboard_log: str = None) -> SAC:
         """Create a new SAC model with configured hyperparameters."""
         hp = self.HYPERPARAMETERS
         policy_kwargs = dict(net_arch=hp["net_arch"])
@@ -159,6 +159,7 @@ class SACTrainer(ModelTrainer):
             buffer_size=hp["buffer_size"],
             policy_kwargs=policy_kwargs,
             device=hp["device"],
+            tensorboard_log=tensorboard_log,
         )
     
     def train(self) -> None:
@@ -184,20 +185,27 @@ class SACTrainer(ModelTrainer):
         model_path = os.path.join(self.MODELS_DIR, f"{self.model_id}.zip")
         stats_path = os.path.join(self.MODELS_DIR, f"{self.model_id}_vecnormalize.pkl")
         
+        # TensorBoard log path
+        tb_log_path = os.path.join(self.LOGS_DIR, f"{self.model_id}_sac")
+        
         # Load or create model
         if os.path.exists(model_path):
             try:
                 print(f"[{self.model_id}] Loading existing SAC model...")
                 model = SAC.load(model_path, env=env, device=self.HYPERPARAMETERS["device"])
+                model.tensorboard_log = tb_log_path
                 if os.path.exists(stats_path):
                     print(f"[{self.model_id}] Loading normalization stats...")
                     env = VecNormalize.load(stats_path, env)
             except Exception as e:
                 print(f"[{self.model_id}] Load failed: {e}. Creating new SAC model.")
-                model = self.create_model(env)
+                model = self.create_model(env, tensorboard_log=tb_log_path)
         else:
             print(f"[{self.model_id}] Creating new SAC model.")
-            model = self.create_model(env)
+            model = self.create_model(env, tensorboard_log=tb_log_path)
+        
+        print(f"[{self.model_id}] TensorBoard logs: {tb_log_path}")
+        print(f"[{self.model_id}] Run 'tensorboard --logdir {self.LOGS_DIR}' to view training progress.")
 
         # Callbacks
         checkpoint_callback = CheckpointCallback(
