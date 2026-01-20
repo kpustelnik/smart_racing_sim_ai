@@ -155,6 +155,11 @@ game:GetService('RunService').Heartbeat:Connect(function (dt: number): ()
       progressToReport *= 20
     end
 
+    -- non-linear speed bonus (exponential scaling)
+    local normalizedSpeed: number = math.clamp(velocityStatus / maxVelocity, 0, 1)
+    local speedBonus: number = (math.exp(normalizedSpeed * 2) - 1) * 0.5 -- max ~3.2 at full speed
+    progressToReport += speedBonus
+
     if cc.terminationPending then
       --print(`Car {CarNumber} terminated. Total Progress: {totalProgress}`)
     end
