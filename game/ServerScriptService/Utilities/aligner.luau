@@ -1,4 +1,14 @@
 -- https://github.com/stravant/roblox-resizealign/blob/main/src/main.server.lua
+-- MIT License
+--[[
+Copyright 2025 Mark Langen (@stravant)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the “Software”), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+]]
 
 type Face = {
 	Object: BasePart,
@@ -6,7 +16,7 @@ type Face = {
 	IsWedge: boolean?,
 }
 
-local function otherNormals(dir: Vector3)
+local function otherNormals(dir: Vector3): (Vector3, Vector3)
 	if math.abs(dir.X) > 0 then
 		return Vector3.new(0, 1, 0), Vector3.new(0, 0, 1)
 	elseif math.abs(dir.Y) > 0 then
@@ -16,13 +26,15 @@ local function otherNormals(dir: Vector3)
 	end
 end
 
-local function extend(v: Vector3, amount: number)
+--[[
+local function extend(v: Vector3, amount: number): Vector3
 	return v.Unit * (v.Magnitude + amount) 
 end
+]]
 
-local function getFacePoints(face: Face)
-	local hsize = face.Object.Size / 2
-	local cf = face.Object.CFrame
+local function getFacePoints(face: Face): {Vector3}
+	local hsize: Vector3 = face.Object.Size / 2
+	local cf: CFrame = face.Object.CFrame
 	if face.IsWedge then
 		return {
 			cf:PointToWorldSpace((Vector3.xAxis + Vector3.yAxis + Vector3.zAxis) * hsize),
@@ -31,8 +43,8 @@ local function getFacePoints(face: Face)
 			cf:PointToWorldSpace((-Vector3.xAxis - Vector3.yAxis - Vector3.zAxis) * hsize),
 		}
 	else
-		local faceDir = Vector3.fromNormalId(face.Normal)
-		local faceA, faceB = otherNormals(faceDir)
+		local faceDir: Vector3 = Vector3.fromNormalId(face.Normal)
+		local faceA: Vector3, faceB: Vector3 = otherNormals(faceDir)
 		faceDir, faceA, faceB = faceDir*hsize, faceA*hsize, faceB*hsize
 		--
 		return {
@@ -44,7 +56,7 @@ local function getFacePoints(face: Face)
 	end
 end
 
-local function copyPartProps (fromPart: BasePart, toPart: BasePart)
+local function copyPartProps (fromPart: BasePart, toPart: BasePart): ()
 	toPart.Anchored     = fromPart.Anchored
 	toPart.Massless     = fromPart.Massless
 	toPart.RootPriority = fromPart.RootPriority
@@ -64,9 +76,9 @@ local function copyPartProps (fromPart: BasePart, toPart: BasePart)
 end
 
 local function getPoints(part: BasePart): {Vector3}
-	local hsize = part.Size / 2
-	local cf = part.CFrame
-	local points = {}
+	local hsize: Vector3 = part.Size / 2
+	local cf: CFrame = part.CFrame
+	local points: {Vector3} = {}
 	for i = -1, 1, 2 do
 		for j = -1, 1, 2 do
 			for k = -1, 1, 2 do
@@ -77,17 +89,17 @@ local function getPoints(part: BasePart): {Vector3}
 	return points
 end
 
-local function getNormal(face: Face)
+local function getNormal(face: Face): Vector3
 	if face.IsWedge then
-		local hsize = face.Object.Size / 2
-		local cf = face.Object.CFrame
+		local hsize: Vector3 = face.Object.Size / 2
+		local cf: CFrame = face.Object.CFrame
 		return (cf.YVector * hsize.Z - cf.ZVector * hsize.Y).Unit
 	else
 		return face.Object.CFrame:VectorToWorldSpace(Vector3.fromNormalId(face.Normal))
 	end
 end
 
-local function getDimension(face: Face)
+local function getDimension(face: Face): Vector3
 	if face.IsWedge then
 		-- Can't subtract from a wedge face, only extend
 		return Vector3.zero
@@ -97,6 +109,7 @@ local function getDimension(face: Face)
 	end
 end
 
+--[[
 function cl0(n)
 	return (n > 0) and n or 0
 end
@@ -131,27 +144,27 @@ function getFurthestPointTo(part: BasePart, points: {Vector3}): Vector3
 		end
 	end
 	return furthestPoint
-end
+end]]
 
-local function getBasis(face: Face)
+local function getBasis(face: Face): (Vector3, Vector3)
 	if face.IsWedge then
 		return face.Object.Position, getNormal(face)
 	else
-		local hsize = face.Object.Size / 2
-		local faceDir = Vector3.fromNormalId(face.Normal)
-		local faceNormal = face.Object.CFrame:VectorToWorldSpace(faceDir)
-		local facePoint = face.Object.CFrame:PointToWorldSpace(faceDir * hsize)
+		local hsize: Vector3 = face.Object.Size / 2
+		local faceDir: Vector3 = Vector3.fromNormalId(face.Normal)
+		local faceNormal: Vector3 = face.Object.CFrame:VectorToWorldSpace(faceDir)
+		local facePoint: Vector3 = face.Object.CFrame:PointToWorldSpace(faceDir * hsize)
 		return facePoint, faceNormal
 	end
 end
 
 -- Get the point in the list most "out" of the face
 function getPositivePointToFace(face, points: {Vector3}): Vector3
-	local basePoint, normal = getBasis(face)
-	local maxDist = -math.huge
-	local maxPoint = nil
-	for _, point in points do
-		local dist = (point - basePoint):Dot(normal)
+	local basePoint: Vector3, normal: Vector3 = getBasis(face)
+	local maxDist: number = -math.huge
+	local maxPoint: Vector3 = nil
+	for _, point: Vector3 in ipairs(points) do
+		local dist: number = (point - basePoint):Dot(normal)
 		if dist > maxDist then
 			maxDist = dist
 			maxPoint = point
@@ -161,11 +174,11 @@ function getPositivePointToFace(face, points: {Vector3}): Vector3
 end
 
 function getNegativePointToFace(face, points: {Vector3}): Vector3
-	local basePoint, normal = getBasis(face)
-	local minDist = math.huge
-	local minPoint = nil
-	for _, point in pairs(points) do
-		local dist = (point - basePoint):Dot(normal)
+	local basePoint: Vector3, normal: Vector3 = getBasis(face)
+	local minDist: number = math.huge
+	local minPoint: Vector3 = nil
+	for _, point: Vector3 in ipairs(points) do
+		local dist: number = (point - basePoint):Dot(normal)
 		if dist < minDist then
 			minDist = dist
 			minPoint = point
@@ -174,21 +187,21 @@ function getNegativePointToFace(face, points: {Vector3}): Vector3
 	return minPoint
 end
 
-function resizePart(face: Face, delta: number)
+function resizePart(face: Face, delta: number): ()
 	if face.IsWedge then
 		-- Create a new part extruding wedge face
-		local point, normal = getBasis(face)
+		local point: Vector3, normal: Vector3 = getBasis(face)
 		local part = Instance.new("Part")
 		copyPartProps(face.Object, part)
 		part.CFrame = CFrame.fromMatrix(point + normal * 0.5 * delta, face.Object.CFrame.XVector, normal)
-		local size = face.Object.Size
+		local size: Vector3 = face.Object.Size
 		part.Size = Vector3.new(size.X, delta, math.sqrt(size.Y^2 + size.Z^2))
 		part.TopSurface = Enum.SurfaceType.Smooth
 		part.BottomSurface = Enum.SurfaceType.Smooth
 		part.Parent = face.Object.Parent
 		part.Name = face.Object.Name.."_Extended"
 	else
-		local axis = Vector3.fromNormalId(face.Normal)
+		local axis: Vector3 = Vector3.fromNormalId(face.Normal)
 		face.Object.Size += Vector3.new(math.abs(axis.X), math.abs(axis.Y), math.abs(axis.Z)) * delta
 		face.Object.CFrame *= CFrame.new(axis * (delta / 2))
 	end
@@ -198,7 +211,7 @@ end
 --IMPLEMENTATION--
 ------------------
 
-function otherNormalIds(normalId: Enum.NormalId)
+function otherNormalIds(normalId: Enum.NormalId): (Enum.NormalId, Enum.NormalId, Enum.NormalId, Enum.NormalId)
 	if normalId == Enum.NormalId.Top or normalId == Enum.NormalId.Bottom then
 		return Enum.NormalId.Right, Enum.NormalId.Left, Enum.NormalId.Back, Enum.NormalId.Front
 	elseif normalId == Enum.NormalId.Right or normalId == Enum.NormalId.Left then
@@ -207,12 +220,13 @@ function otherNormalIds(normalId: Enum.NormalId)
 		return Enum.NormalId.Top, Enum.NormalId.Bottom, Enum.NormalId.Right, Enum.NormalId.Left
 	end
 end
-function getFaceSize(part: BasePart, normalId: Enum.NormalId)
-	local size = part.Size
-	local vec = Vector3.fromNormalId(normalId)
-	local x = (1 - math.abs(vec.X)) * size.X
-	local y = (1 - math.abs(vec.Y)) * size.Y
-	local z = (1 - math.abs(vec.Z)) * size.Z
+--[[
+function getFaceSize(part: BasePart, normalId: Enum.NormalId): number
+	local size: Vector3 = part.Size
+	local vec: Vector3 = Vector3.fromNormalId(normalId)
+	local x: number = (1 - math.abs(vec.X)) * size.X
+	local y: number = (1 - math.abs(vec.Y)) * size.Y
+	local z: number = (1 - math.abs(vec.Z)) * size.Z
 	return (if x == 0 then 1 else x) * (if y == 0 then 1 else y) * (if z == 0 then 1 else z)
 end
 function getFacePolygon(part: BasePart, normalId: Enum.NormalId)
@@ -255,12 +269,14 @@ function getFacePolygon(part: BasePart, normalId: Enum.NormalId)
 		},
 	}
 end
+]]
 
 --[[
 	The return value `t` is a number such that `r1o + t * r1d` is the point of
 	closest approach on the first ray between the two rays specified by the
 	arguments.
 ]]
+--[[
 function intersectRayRay(r1o, r1d, r2o, r2d)
 	local n =
 		(r2o - r1o):Dot(r1d) * r2d:Dot(r2d) +
@@ -274,16 +290,17 @@ function intersectRayRay(r1o, r1d, r2o, r2d)
 		return true, n / d
 	end
 end
+]]
 
-local function isCylinder(part: BasePart)
+local function isCylinder(part: BasePart): boolean
 	return part:IsA("Part") and part.Shape == Enum.PartType.Cylinder
 end
 
 
-local function fillJoint(faceA: Face, faceB: Face, fillPoint, fillAxis: Vector3, pointsA, pointsB, offsetA, offsetB)
-	local maxProj = -math.huge
-	local minProj = math.huge
-	local maxRadius = -math.huge
+local function fillJoint(faceA: Face, faceB: Face, fillPoint, fillAxis: Vector3, pointsA, pointsB, offsetA, offsetB): ()
+	local maxProj: number = -math.huge
+	local minProj: number = math.huge
+	local maxRadius: number = -math.huge
 	for _, point in pointsA do
 		local modPoint = point + offsetA
 		local proj = (modPoint - fillPoint):Dot(fillAxis)
@@ -302,10 +319,10 @@ local function fillJoint(faceA: Face, faceB: Face, fillPoint, fillAxis: Vector3,
 	end
 	--
 	local centerPoint = fillPoint + fillAxis * (0.5 * (minProj + maxProj))
-	local length = (maxProj - minProj)
-	local radius = maxRadius
+	local length: number = (maxProj - minProj)
+	local radius: number = maxRadius
 	--
-	local cyl = Instance.new("Part")
+	local cyl: Part = Instance.new("Part")
 	if isCylinder(faceA.Object) and isCylinder(faceB.Object) then
 		cyl.Shape = Enum.PartType.Ball
 	else
@@ -319,29 +336,29 @@ local function fillJoint(faceA: Face, faceB: Face, fillPoint, fillAxis: Vector3,
 	cyl.Parent = faceB.Object.Parent
 end
 
-local OUTER_TOUCH = "Outer Touch"
-local INNER_TOUCH = "Inner Touch"
-local MIDDLE_JOIN = "Rounded Join"
-local BUTT_JOINT = "Butt Joint"
-local EXTEND_UP_TO = "Extend Up To"
-local EXTEND_INTO = "Extend Into"
+local OUTER_TOUCH: string = "Outer Touch"
+local INNER_TOUCH: string = "Inner Touch"
+local MIDDLE_JOIN: string = "Rounded Join"
+local BUTT_JOINT: string = "Butt Joint"
+local EXTEND_UP_TO: string = "Extend Up To"
+local EXTEND_INTO: string = "Extend Into"
 
 -- Calculate the result
-function doExtend(faceA, faceB, mode)
-	local pointsA = getFacePoints(faceA)
-	local pointsB = getFacePoints(faceB)
-	local localDimensionA = getDimension(faceA)
-	local localDimensionB = getDimension(faceB)
-	local dirA = getNormal(faceA)
-	local dirB = getNormal(faceB)
+function doExtend(faceA, faceB, mode): ()
+	local pointsA: {Vector3} = getFacePoints(faceA)
+	local pointsB: {Vector3} = getFacePoints(faceB)
+	local localDimensionA: Vector3 = getDimension(faceA)
+	local localDimensionB: Vector3 = getDimension(faceB)
+	local dirA: Vector3 = getNormal(faceA)
+	local dirB: Vector3 = getNormal(faceB)
 	
 	-- Compare the directions
-	local a, b, c = dirA:Dot(dirA), dirA:Dot(dirB), dirB:Dot(dirB)
-	local denom = a*c - b*b
-	local isParallel = math.abs(denom) < 0.001
+	local a: number, b: number, c: number = dirA:Dot(dirA), dirA:Dot(dirB), dirB:Dot(dirB)
+	local denom: number = a*c - b*b
+	local isParallel: boolean = math.abs(denom) < 0.001
 	
 	-- Find the points to extend out to meet
-	local extendPointA, extendPointB;
+	local extendPointA: Vector3, extendPointB: Vector3;
 	if mode.Mode == EXTEND_INTO or mode.Mode == OUTER_TOUCH or mode.Mode == BUTT_JOINT or (isParallel and mode.Mode == MIDDLE_JOIN) then
 		extendPointA = getPositivePointToFace(faceB, pointsA)
 		extendPointB = getPositivePointToFace(faceA, pointsB)
@@ -351,20 +368,20 @@ function doExtend(faceA, faceB, mode)
 	elseif mode.Mode == MIDDLE_JOIN then
 		-- First pick a point and radius based on A
 		extendPointA = getBasis(faceA)
-		local fillAxis = dirA:Cross(dirB).Unit
-		local radiusA = -math.huge
-		for _, point in pointsA do
-			local projPoint = extendPointA + fillAxis * (point - extendPointA):Dot(fillAxis)
+		local fillAxis: Vector3 = dirA:Cross(dirB).Unit
+		local radiusA: number = -math.huge
+		for _, point: Vector3 in pointsA do
+			local projPoint: Vector3 = extendPointA + fillAxis * (point - extendPointA):Dot(fillAxis)
 			radiusA = math.max(radiusA, (point - projPoint).Magnitude)
 		end
 		
 		-- Next extend out as far as possible in B but then pull back by the A radius
-		local centerPointB = getBasis(faceB)
+		local centerPointB: Vector3 = getBasis(faceB)
 		extendPointB = getPositivePointToFace(faceA, pointsB)
-		local proj = (extendPointB - centerPointB):Dot(fillAxis)
-		local projPoint = centerPointB + fillAxis * proj
-		local distanceToAxis = (extendPointB - projPoint).Magnitude
-		local frac = radiusA / distanceToAxis
+		local proj: number = (extendPointB - centerPointB):Dot(fillAxis)
+		local projPoint: Vector3 = centerPointB + fillAxis * proj
+		local distanceToAxis: number = (extendPointB - projPoint).Magnitude
+		local frac: number = radiusA / distanceToAxis
 		extendPointB = extendPointB:Lerp(projPoint, frac)
 	else
 		assert(false, "unreachable")
@@ -372,19 +389,19 @@ function doExtend(faceA, faceB, mode)
 	
 	-- Find the closest distance between the rays (extendPointA, dirA) and (extendPointB, dirB):
 	-- See: http://geomalgorithms.com/a07-_distance.html#dist3D_Segment_to_Segment
-	local startSep = extendPointB - extendPointA
-	local d, e = dirA:Dot(startSep), dirB:Dot(startSep)
+	local startSep: Vector3 = extendPointB - extendPointA
+	local d: number, e: number = dirA:Dot(startSep), dirB:Dot(startSep)
 
 	-- Is this a degenerate case?
 	if isParallel then
 		-- Parts are parallel, extend faceA to faceB
-		local lenA = (extendPointA - extendPointB):Dot(getNormal(faceB))
+		local lenA: number = (extendPointA - extendPointB):Dot(getNormal(faceB))
 		if faceA.IsWedge then
 			if lenA < 0 then
 				return
 			end
 		else
-			local extendableA = (localDimensionA * faceA.Object.Size).magnitude
+			local extendableA: number = (localDimensionA * faceA.Object.Size).magnitude
 			if getNormal(faceA):Dot(getNormal(faceB)) > 0 then
 				lenA = -lenA
 			end
@@ -397,34 +414,34 @@ function doExtend(faceA, faceB, mode)
 	end
 
 	-- Get the distances to extend by
-	local lenA = -(b*e - c*d) / denom
-	local lenB = -(a*e - b*d) / denom
+	local lenA: number = -(b*e - c*d) / denom
+	local lenB: number = -(a*e - b*d) / denom
 
 	if mode.Mode == EXTEND_INTO or mode.Mode == EXTEND_UP_TO then
 		-- We need to find a different lenA, which is the intersection of
 		-- extendPointA to the plane faceB:
 		-- dist to plane (point, normal) = - (ray_dir . normal) / ((ray_origin - point) . normal)
-		local denom2 = dirA:Dot(dirB)
+		local denom2: number = dirA:Dot(dirB)
 		if math.abs(denom2) > 0.0001 then
 			lenA = - (extendPointA - extendPointB):Dot(dirB) / denom2
 			lenB = 0
 		else
 			-- Perpendicular
 			-- Project all points of faceB onto faceA and extend by that much
-			local points = getPoints(faceB.Object)
+			local points: {Vector3} = getPoints(faceB.Object)
 			if mode.Mode == EXTEND_UP_TO then
-				local smallestLen = math.huge
-				for _, v in pairs(points) do
-					local dist = (v - extendPointA):Dot(getNormal(faceA))
+				local smallestLen: number = math.huge
+				for _, v: Vector3 in pairs(points) do
+					local dist: number = (v - extendPointA):Dot(getNormal(faceA))
 					if dist < smallestLen then
 						smallestLen = dist
 					end
 				end
 				lenA = smallestLen
 			elseif mode.Mode == EXTEND_INTO then
-				local largestLen = -math.huge
-				for _, v in pairs(points) do
-					local dist = (v - extendPointA):Dot(getNormal(faceA))
+				local largestLen: number = -math.huge
+				for _, v: Vector3 in pairs(points) do
+					local dist: number = (v - extendPointA):Dot(getNormal(faceA))
 					if dist > largestLen then
 						largestLen = dist
 					end
@@ -440,8 +457,8 @@ function doExtend(faceA, faceB, mode)
 	-- Are both extents doable?
 	-- Note: Negative amounts to extend by *are* allowed, but only
 	-- up to the size of the part on the dimension being extended on.
-	local extendableA = (localDimensionA * faceA.Object.Size).magnitude
-	local extendableB = (localDimensionB * faceB.Object.Size).magnitude
+	local extendableA: number = (localDimensionA * faceA.Object.Size).magnitude
+	local extendableB: number = (localDimensionB * faceB.Object.Size).magnitude
 	if lenA < -extendableA then
 		return
 	end
@@ -455,7 +472,7 @@ function doExtend(faceA, faceB, mode)
 	
 	-- Handle filling a joint
 	if mode.Mode == MIDDLE_JOIN then
-		local fillAxis = dirA:Cross(dirB).Unit
+		local fillAxis: Vector3 = dirA:Cross(dirB).Unit
 		fillJoint(faceA, faceB, extendPointA + dirA * lenA, fillAxis, pointsA, pointsB, dirA * lenA, dirB * lenB)
 	end
 
@@ -464,11 +481,11 @@ function doExtend(faceA, faceB, mode)
 	-- "butts up against" the second part (B).
 	if mode.Mode == BUTT_JOINT then
 		-- Find the width of B on the axis A, which is the amount to resize by
-		local points = getFacePoints(faceB)
-		local minV =  math.huge
-		local maxV = -math.huge
-		for _, v in pairs(points) do
-			local proj = (v - extendPointA):Dot(dirA)
+		local points: {Vector3} = getFacePoints(faceB)
+		local minV: number =  math.huge
+		local maxV: number = -math.huge
+		for _, v: Vector3 in pairs(points) do
+			local proj: number = (v - extendPointA):Dot(dirA)
 			if proj < minV then minV = proj end
 			if proj > maxV then maxV = proj end
 		end

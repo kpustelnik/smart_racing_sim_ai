@@ -44,13 +44,14 @@ Part.CanTouch = false
 Part.CanQuery = false
 Part.Parent = game.Workspace
 
-CheckpointsController.GetTrackDistanceState = function (Position: Vector3): (number, number)
+CheckpointsController.GetTrackDistanceState = function (Position: Vector3, Orientation: Vector3?): (number, number, number?)
   if #CheckpointsController.Checkpoints == 0 then return 0, 0 end
 
   local minDistanceToRay: number = math.huge
   local minDistanceCheckpoint: number = 0
   local minDistanceProgressDistance: number = math.huge
   local Prev: BasePart = CheckpointsController.Checkpoints[1]
+  local TrackOrientation: number? = nil
   for i = 1, #CheckpointsController.Checkpoints + 1 do
     local actualIndex: number = ((i - 1) % #CheckpointsController.Checkpoints) + 1 -- We should also count from the last checkpoint to the first checkpoint (start)
     local Next: BasePart = CheckpointsController.Checkpoints[actualIndex]
@@ -61,16 +62,22 @@ CheckpointsController.GetTrackDistanceState = function (Position: Vector3): (num
       minDistanceCheckpoint = i - 1
       minDistanceProgressDistance = (Prev.Position - CP).Magnitude
       Part.CFrame = CFrame.new(CP)
+
+      if Orientation ~= nil then
+        local TrackDirection: Vector3 = (Next.Position - Prev.Position).Unit * Vector3.new(1, 0, 1)
+        Orientation = Orientation * Vector3.new(1, 0, 1)
+        TrackOrientation = math.atan2(Orientation:Cross(TrackDirection).Y, Orientation:Dot(TrackDirection))
+      end
     end
     Prev = Next
   end
 
-  return CheckpointsController.GetSizeTo(minDistanceCheckpoint) + minDistanceProgressDistance, minDistanceCheckpoint
+  return CheckpointsController.GetSizeTo(minDistanceCheckpoint) + minDistanceProgressDistance, minDistanceCheckpoint, TrackOrientation
 end
 
-CheckpointsController.GetTrackProgressState = function (Position: Vector3): (number, number)
-  local DistanceState, LastCheckpoint = CheckpointsController.GetTrackDistanceState(Position)
-  return math.clamp(DistanceState / CheckpointsController.GetTrackSize(), 0, 1), LastCheckpoint
+CheckpointsController.GetTrackProgressState = function (Position: Vector3, Orientation: Vector3?): (number, number, number?)
+  local DistanceState: number, LastCheckpoint: number, TrackOrientation: number? = CheckpointsController.GetTrackDistanceState(Position, Orientation)
+  return math.clamp(DistanceState / CheckpointsController.GetTrackSize(), 0, 1), LastCheckpoint, TrackOrientation
 end
 
 -- Script (TODO: Move?)
