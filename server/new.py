@@ -1,13 +1,10 @@
 import asyncio
-import functools
 import numpy as np
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 import threading
 import queue
 import os
-import shutil
-import json
 from typing import List, Dict, Optional, Any
 
 # RL Libraries
@@ -185,13 +182,13 @@ class PettingZooWSEnv(ParallelEnv):
                 # Handle missing data (agent died/lag)
                 observations[agent] = np.zeros(BASE_STATE_DIM, dtype=np.float32)
                 rewards[agent] = 0.0
-                terminations[agent] = True
-                truncations[agent] = True
+                terminations[agent] = False
+                truncations[agent] = False
 
             infos[agent] = {}
 
         # Remove dead agents from the loop if necessary
-        self.agents = [agent for agent in self.agents if not (terminations[agent] or truncations[agent])]
+        # self.agents = [agent for agent in self.agents if not (terminations[agent] or truncations[agent])]
 
         return observations, rewards, terminations, truncations, infos
 
@@ -242,11 +239,11 @@ def train_model(model_id: str, bridge: DataBridge):
 
 app = FastAPI()
 
-# --- WEBSOCKET ENDPOINT ---
+# --- WEBSOCKET ENDPOINT ---vv
 @app.websocket("/ws/{model_id}")
 async def websocket_endpoint(websocket: WebSocket, model_id: str):
     await websocket.accept()
-    
+
     # Initialize the bridge
     bridge = DataBridge(num_agents=NUM_AGENTS)
     

@@ -2,14 +2,14 @@ local HttpService = game:GetService("HttpService")
 local Workspace = game:GetService('Workspace')
 local PhysicsService = game:GetService('PhysicsService')
 PhysicsService:RegisterCollisionGroup('CAR')
-PhysicsService:CollisionGroupSetCollidable('CAR', 'CAR', true) -- Enable cars collisisons
+PhysicsService:CollisionGroupSetCollidable('CAR', 'CAR', false) -- Enable cars collisisons
 
 local TrackWalls = Workspace:WaitForChild('Track'):WaitForChild('Walls')
 
 local CheckpointsController = require(script.Parent:WaitForChild('Track'):WaitForChild('CheckpointsController'))
 local CarsController = require(script.Parent:WaitForChild('Track'):WaitForChild('CarsController'))
 
-local modelId: string = 'multi_car_orient'
+local modelId: string = 'car'
 local carModel: string = 'Car'
 local websocketUrl: string = `ws://localhost:8000/ws/{modelId}`
 local websocketClient: WebStreamClient = HttpService:CreateWebStreamClient(Enum.WebStreamClientType.WebSocket, {
@@ -57,12 +57,14 @@ SpawnCar = function (CarNumber: number): ()
     lastRc = lastRc,
     carController = carController,
     terminationPending = false,
+    truncationPending = false,
     lap = 0,
     lastCheckpoint = 1,
     startTime = os.time(),
     lastBestProgress = 0,
     lastBestProgressTime = os.time(),
-    lastReportedProgress = 0
+    lastReportedProgress = 0,
+    Acted = false
   }
   CarData[CarNumber] = cc
 
@@ -77,12 +79,13 @@ SpawnCar = function (CarNumber: number): ()
   end
 end
 
-local AddCar = function()
-  CarsSpawned += 1
-  local CarNumber: number = CarsSpawned
-  SpawnCar(CarNumber)
+local CarsNames: { [string]: number } = {}
+local getCarName = function (CarNumber: number): string?
+  for name: string, number in pairs(CarsNames) do
+    if number == CarNumber then return name end
+  end
+  return nil
 end
-for _: number = 1, 5 do AddCar() end
 
 local runningLast: boolean = false
 local FPS: number = 15
@@ -99,6 +102,7 @@ game:GetService('RunService').Heartbeat:Connect(function (dt: number): ()
 
   runningLast = true
   local dataToSend = {}
+  local AnyActed = false
   for CarNumber: number, Car: Model in ipairs(AllCars) do
     local cc = CarData[CarNumber]
     if cc == nil then continue end
@@ -123,7 +127,7 @@ game:GetService('RunService').Heartbeat:Connect(function (dt: number): ()
       cc.lastBestProgress = totalProgress
       cc.lastBestProgressTime = os.time()
     elseif os.time() - cc.lastBestProgressTime > 4 then
-      cc.terminationPending = true -- Stuck for too long
+      cc.truncationPending = true -- Stuck for too long
     end
     
     local rcResults: {number}? = CarsController.GetRaycasts(Car)
@@ -152,43 +156,133 @@ game:GetService('RunService').Heartbeat:Connect(function (dt: number): ()
     end
 
     if cc.terminationPending then
-      print(`Car {CarNumber} terminated. Total Progress: {totalProgress}`)
+      --print(`Car {CarNumber} terminated. Total Progress: {totalProgress}`)
     end
 
-    table.insert(dataToSend, {
-      last_observation = cc.lastRc,
-      current_observation = rcResults,
-      last_action = {curThrottle, curSteering, curNitro},
-      reward = if not cc.terminationPending then progressToReport else -10,
-      terminated = cc.terminationPending
-    })
+    if not cc.Acted then
+      AnyActed = true
+    end
+    cc.Acted = false
+
+    local carName = getCarName(CarNumber) :: any
+    if carName ~= nil then
+      dataToSend[carName] = {
+        -- last_observation = cc.lastRc,
+        obs = rcResults,
+        -- last_action = {curThrottle, curSteering, curNitro},
+        reward = if not cc.terminationPending then progressToReport else -10,
+        terminated = cc.terminationPending,
+        truncated = cc.truncationPending
+      }
+      cc.lastRc = rcResults
+    end
+  end
+
+  if AnyActed then
+    warn('Sent observations before any action was taken')
   end
 
   -- local aiTraining: boolean = carInputs:GetAttribute('aiTraining') == true
-  local aiTraining: boolean = true -- TODO: Implement the value itself back as itn eeds to be handled globally
+  --local aiTraining: boolean = true -- TODO: Implement the value itself back as it needs to be handled globally
   websocketClient:Send(HttpService:JSONEncode(dataToSend))
-  local result = HttpService:JSONDecode(websocketClient.MessageReceived:Wait())
-  for CarNumber: number, _: Model in ipairs(AllCars) do
-    local cc = CarData[CarNumber]
-    if cc == nil then continue end
-    
-    if cc.terminationPending then
-      task.spawn(SpawnCar, CarNumber)
-      continue
-    end
-
-    local aiSteering: boolean = cc.carInputs:GetAttribute('aiSteering') == true
-    if aiSteering then
-      cc.carInputs:SetAttribute('throttleInput', result.actions[CarNumber][1])
-      cc.carInputs:SetAttribute('steeringInput', result.actions[CarNumber][2])
-      cc.carInputs:SetAttribute('nitroInput', result.actions[CarNumber][3] > 0.5)
-    end
-
-    cc.lastRc = dataToSend[CarNumber].current_observation
-    cc.carController:update(dt)
-  end
 
   runningLast = false
+end)
+
+local handles = {}
+
+type SpawnAgentsData = {
+  agents: { string }
+}
+handles['SPAWN_AGENTS'] = function (data: SpawnAgentsData): () 
+  local agents: { string } = data.agents
+  
+  for _, AgentId: string in pairs(agents) do
+    CarsSpawned += 1
+    local CarNumber: number = CarsSpawned
+    SpawnCar(CarNumber)
+    CarsNames[AgentId] = CarNumber
+  end
+end
+
+type ResetData = {
+  agents: { string }
+}
+handles['RESET'] = function (data: ResetData): ()
+  local agents: { string } = data.agents
+  
+  for _, AgentId: string in pairs(agents) do
+    local CarNumber: number? = CarsNames[AgentId]
+    if CarNumber then
+      local cCarData = CarData[CarNumber]
+      if cCarData == nil then continue end
+
+      --cCarData.terminationPending = true
+      task.spawn(SpawnCar, CarNumber)
+    end
+  end
+end
+
+local CloseEnv = function (): ()
+  print("Closing envv")
+  for agentId, carNumber in pairs(CarsNames) do
+    local CurrentCar: Model? = AllCars[carNumber]
+    local CurrentConnections: { RBXScriptConnection }? = CarCurrentConnections[carNumber]
+    if CurrentCar then
+      CurrentCar:Destroy()
+      CurrentCar = nil
+    end
+    if CurrentConnections ~= nil then for _, conn: RBXScriptConnection in ipairs(CurrentConnections) do conn:Disconnect() end end
+    CarData[carNumber] = nil
+  end
+end
+handles['CLOSE'] = CloseEnv
+
+type ActionData = {
+
+}
+handles['ACTION'] = function (data: ActionData): ()
+  for agentId: string, agentData in pairs(data) do
+    local CarNumber: number? = CarsNames[agentId]
+    if CarNumber == nil then continue end
+    local cc = CarData[CarNumber]
+    if cc == nil then continue end
+
+    --[[
+    local aiSteering: boolean = cc.carInputs:GetAttribute('aiSteering') == true
+    if aiSteering then
+    ]]
+    cc.carInputs:SetAttribute('throttleInput', agentData[1])
+    cc.carInputs:SetAttribute('steeringInput', agentData[2])
+    cc.carInputs:SetAttribute('nitroInput', agentData[3] > 0.5)
+    cc.Acted = true
+
+    if cc.lastUpdateTime ~= nil and typeof(cc.lastUpdateTime) == "number" then
+      local dt: number = tick() - cc.lastUpdateTime
+      cc.carController:update(dt)
+    end
+    cc.lastUpdateTime = tick()
+  end
+end
+
+type BackendMessage = {
+  command: string,
+  data: any
+}
+
+websocketClient.Closed:Connect(function(): ()
+  CloseEnv()
+end)
+
+websocketClient.MessageReceived:Connect(function(msg): ()
+  local decodedMsg: BackendMessage = HttpService:JSONDecode(msg)
+  local handler = handles[decodedMsg.command]
+  if handler then
+    local success: boolean, result = pcall(handler, decodedMsg.data)
+    if not success then
+      print("Error handling message:", result)
+    end
+  end
 end)
 
 return {}
