@@ -1,6 +1,9 @@
 --!nonstrict
 
---[[  Priority Queue implemented in lua, based on a binary heap.
+--[[
+https://gist.github.com/LukeMS/89dc587abd786f92d60886f4977b1953
+
+Priority Queue implemented in lua, based on a binary heap.
 Copyright (C) 2017 Lucas de Morais Siqueira <lucas.morais.siqueira@gmail.com>
 License: zlib
   This software is provided 'as-is', without any express or implied
@@ -16,8 +19,9 @@ License: zlib
   2. Altered source versions must be plainly marked as such, and must not be
      misrepresented as being the original software.
   3. This notice may not be removed or altered from any source distribution.
-]]--
 -- modified by xxopxe@gmail.com
+]]
+
 
 local floor = math.floor
 
@@ -38,7 +42,7 @@ setmetatable(
 )
 
 
-function PriorityQueue:initialize()
+function PriorityQueue:initialize(): ()
   --[[  Initialization.
     Example:
         PriorityQueue = require("priority_queue")
@@ -49,21 +53,21 @@ function PriorityQueue:initialize()
   self.current_size = 0
 end
 
-function PriorityQueue:empty()
+function PriorityQueue:empty(): boolean
   return self.current_size == 0
 end
 
-function PriorityQueue:size()
+function PriorityQueue:size(): number
   return self.current_size
 end
 
-function PriorityQueue:swim(i)
+function PriorityQueue:swim(i): ()
   -- Swim up on the tree and fix the order heap property.
   local heap_val = self.heap_val
   local heap_pri = self.heap_pri
 
   while floor(i / 2) > 0 do
-    local half = floor(i / 2)
+    local half: number = floor(i / 2)
     if heap_pri[i] < heap_pri[half] then
       heap_val[i], heap_val[half] = heap_val[half], heap_val[i]
       heap_pri[i], heap_pri[half] = heap_pri[half], heap_pri[i]
@@ -72,7 +76,7 @@ function PriorityQueue:swim(i)
   end
 end
 
-function PriorityQueue:put(v, p)
+function PriorityQueue:put(v, p): ()
   --[[ Put an item on the queue.
     Args:
         v: the item to be stored
@@ -85,14 +89,14 @@ function PriorityQueue:put(v, p)
   self:swim(self.current_size)
 end
 
-function PriorityQueue:sink(i: number)
+function PriorityQueue:sink(i: number): ()
   -- Sink down on the tree and fix the order heap property.
-  local size = self.current_size
+  local size: number = self.current_size
   local heap_val = self.heap_val
   local heap_pri = self.heap_pri
 
   while (i * 2) <= size do
-    local mc = self:min_child(i)
+    local mc: number = self:min_child(i)
     if heap_pri[i] > heap_pri[mc] then
       heap_val[i], heap_val[mc] = heap_val[mc], heap_val[i]
       heap_pri[i], heap_pri[mc] = heap_pri[mc], heap_pri[i]

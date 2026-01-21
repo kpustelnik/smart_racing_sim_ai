@@ -214,9 +214,9 @@ RunService.Heartbeat:Connect(function (dt: number): ()
 		-- Instead of a cliff, create a "force field" near walls.
 		-- Rays are 0 to 1. If closer than 0.3 (30%), penalty increases.
 		if rcResults then
-			local minRayDist = 1
+			local minRayDist: number = 1
 			for i = 1, #rcResults - 2 do -- Ignore last 2 (velocity/nitro slots)
-				local dist = rcResults[i]
+				local dist: number = rcResults[i]
 				if dist < minRayDist then minRayDist = dist end
 			end
 

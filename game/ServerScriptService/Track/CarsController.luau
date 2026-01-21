@@ -99,7 +99,16 @@ CarsController.GetRaycasts = function (car: Model): { number }?
     if rc.IgnoreCars then
       params.FilterDescendantsInstances = { CarsFolder }
     else
-      params.FilterDescendantsInstances = { car }
+      local Env: unknown? = car:GetAttribute('ENV')
+      local SameEnvCars: { Model } = {}
+      if Env ~= nil and typeof(Env) == 'string' then
+        for _, otherCar: Instance in pairs(CarsFolder:GetChildren()) do
+          if otherCar:IsA('Model') and otherCar:GetAttribute('ENV') == Env then
+            table.insert(SameEnvCars, otherCar)
+          end
+        end
+      end
+      params.FilterDescendantsInstances = SameEnvCars
     end
 
     local raycastResult: RaycastResult<BasePart>? = Workspace:Raycast(startPos, targetPos - startPos, params)

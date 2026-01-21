@@ -1,7 +1,7 @@
 -- https://github.com/stravant/roblox-resizealign/blob/main/src/main.server.lua
 -- MIT License
 --[[
-Copyright 2025 Mark Langen (@stravant)
+Copyright 2023 Mark Langen (@stravant)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the “Software”), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 
@@ -199,7 +199,7 @@ function resizePart(face: Face, delta: number): ()
 		part.TopSurface = Enum.SurfaceType.Smooth
 		part.BottomSurface = Enum.SurfaceType.Smooth
 		part.Parent = face.Object.Parent
-		part.Name = face.Object.Name.."_Extended"
+		part.Name = face.Object.Name .. "_Extended"
 	else
 		local axis: Vector3 = Vector3.fromNormalId(face.Normal)
 		face.Object.Size += Vector3.new(math.abs(axis.X), math.abs(axis.Y), math.abs(axis.Z)) * delta
@@ -211,6 +211,7 @@ end
 --IMPLEMENTATION--
 ------------------
 
+--[[
 function otherNormalIds(normalId: Enum.NormalId): (Enum.NormalId, Enum.NormalId, Enum.NormalId, Enum.NormalId)
 	if normalId == Enum.NormalId.Top or normalId == Enum.NormalId.Bottom then
 		return Enum.NormalId.Right, Enum.NormalId.Left, Enum.NormalId.Back, Enum.NormalId.Front
@@ -220,7 +221,6 @@ function otherNormalIds(normalId: Enum.NormalId): (Enum.NormalId, Enum.NormalId,
 		return Enum.NormalId.Top, Enum.NormalId.Bottom, Enum.NormalId.Right, Enum.NormalId.Left
 	end
 end
---[[
 function getFaceSize(part: BasePart, normalId: Enum.NormalId): number
 	local size: Vector3 = part.Size
 	local vec: Vector3 = Vector3.fromNormalId(normalId)

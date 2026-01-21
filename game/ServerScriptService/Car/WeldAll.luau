@@ -1,13 +1,15 @@
+--!nonstrict
+--  Utility script
 local toWeld = game.Workspace.Truck.Body
 local weldto = game.Workspace.Truck.Chassis
 
-for _, p in ipairs(toWeld:GetDescendants()) do
+for _, p: Instance in ipairs(toWeld:GetDescendants()) do
   if p:IsA('WeldConstraint') then p:Destroy() end
 end
 
-for i, part in pairs(toWeld:GetDescendants()) do
+for _, part: Instance in pairs(toWeld:GetDescendants()) do
   if part:IsA('BasePart') then
-    local weld = Instance.new('WeldConstraint')
+    local weld: WeldConstraint = Instance.new('WeldConstraint')
     weld.Part0 = weldto
     weld.Part1 = part
     weld.Parent = part
