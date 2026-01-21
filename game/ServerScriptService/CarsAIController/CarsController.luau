@@ -29,7 +29,7 @@ CarsController.PickSpawns = function (count: number): { BasePart }
         pickedSpawn = nil
         break
       end
-      local pickedSpawnI = r:NextInteger(1, #AllSpawns)
+      local pickedSpawnI: number = r:NextInteger(1, #AllSpawns)
       pickedSpawn = AllSpawns[pickedSpawnI]
       table.remove(AllSpawns, pickedSpawnI)
       if pickedSpawn ~= nil then break end

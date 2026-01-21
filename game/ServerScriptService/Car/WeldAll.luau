@@ -1,8 +1,9 @@
 --!nonstrict
 -- FIN
---  Utility script
-local toWeld = game.Workspace.Truck.Body
-local weldto = game.Workspace.Truck.Chassis
+-- Utility script
+local toWeld: Instance? = nil
+local weldto: Instance? = nil
+if toWeld == nil or weldto == nil then error("Missing data") end
 
 for _, p: Instance in ipairs(toWeld:GetDescendants()) do
   if p:IsA('WeldConstraint') then p:Destroy() end

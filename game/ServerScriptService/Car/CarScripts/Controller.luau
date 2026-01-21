@@ -1,19 +1,31 @@
+--!strict
+-- FIN
+-- Handles updating car controls based on input attributes (by Roblox)
+
 local Constants = require(script.Parent:WaitForChild('Constants'))
 local Units = require(script.Parent:WaitForChild('Units'))
 local function lerp(a: number, b: number, t: number): number return a + (b - a) * t end
 
-local car = script.Parent.Parent
-local chassis = car.Chassis
-local inputs = car.Inputs
-local engine = car.Engine
-local steering = car.Steering
-local wheels = car.Wheels
+local car: Folder = script.Parent.Parent
+local chassis: BasePart = car:WaitForChild('Chassis') :: BasePart
+local inputs: Configuration = car:WaitForChild('Inputs') :: Configuration
+local engine: Folder = car:WaitForChild('Engine') :: Folder
+local steering: Folder = car:WaitForChild('Steering') :: Folder
+local wheels: Folder = car:WaitForChild('Wheels') :: Folder
 
-local wheelParts = {
-	wheels.WheelFR.Wheel,
-	wheels.WheelFL.Wheel,
-	wheels.WheelRR.Wheel,
-	wheels.WheelRL.Wheel,
+local ReadNumberAttribute = function (i: Instance, attrName: string): number?
+	local value: unknown? = i:GetAttribute(attrName)
+	if value ~= nil and typeof(value) == "number" then
+		return value :: number
+	end
+	return nil
+end
+
+local wheelParts: { BasePart } = {
+	wheels:WaitForChild('WheelFR'):WaitForChild('Wheel') :: BasePart,
+	wheels:WaitForChild('WheelFL'):WaitForChild('Wheel') :: BasePart,
+	wheels:WaitForChild('WheelRR'):WaitForChild('Wheel') :: BasePart,
+	wheels:WaitForChild('WheelRL'):WaitForChild('Wheel') :: BasePart,
 }
 
 local engineParameters: { [string]: number } = {
@@ -46,61 +58,78 @@ local wheelParameters: { [string]: number } = {
 }
 
 -- Calculate wheel radius based on the front right wheel
-local wheelRadius = wheelParts[1].Size.Y / 2
+local wheelRadius: number = wheelParts[1].Size.Y / 2
 
 -- Return the current chassis speed on the local Z axis in miles per hour
 local function getChassisForwardSpeed(): number
-	local relativeVelocity = chassis.CFrame:VectorToObjectSpace(chassis.AssemblyLinearVelocity)
-	local milesPerHour = Units.studsPerSecondToMilesPerHour(-relativeVelocity.Z)
+	local relativeVelocity: Vector3 = chassis.CFrame:VectorToObjectSpace(chassis.AssemblyLinearVelocity)
+	local milesPerHour: number = Units.studsPerSecondToMilesPerHour(-relativeVelocity.Z)
 	return milesPerHour
 end
 
 -- Update the amount of nitro available
-local function updateNitro(deltaTime: number)
-	local nitroInput = inputs:GetAttribute(Constants.NITRO_INPUT_ATTRIBUTE)
-	local engineNitro = engine:GetAttribute(Constants.ENGINE_NITRO_ATTRIBUTE)
-	local isNitroEnabled = nitroInput and engineNitro > 0
+local NitroVelocity: LinearVelocity = engine:WaitForChild('NitroVelocity') :: LinearVelocity
+local function updateNitro(deltaTime: number): ()
+	local nitroInput: unknown? = inputs:GetAttribute(Constants.NITRO_INPUT_ATTRIBUTE)
+	local boolNitroInput: boolean = nitroInput ~= nil and typeof(nitroInput) == "boolean" and nitroInput :: boolean
+	local engineNitro: number? = ReadNumberAttribute(engine, Constants.ENGINE_NITRO_ATTRIBUTE)
+	if engineNitro == nil then return end
+
+	local isNitroEnabled: boolean = boolNitroInput and engineNitro > 0
 	-- If the nitro input is enabled, lower the nitro level
 	if isNitroEnabled then
-		local amount = 1 / engineParameters.nitroTime
+		local amount: number = 1 / engineParameters.nitroTime
 		engineNitro = math.max(engineNitro - amount * deltaTime, 0)
+
 		-- If the nitro level reaches 0, disable the nitro input
 		if engineNitro == 0 then
 			inputs:SetAttribute(Constants.NITRO_INPUT_ATTRIBUTE, false)
 			nitroInput = false
 		end
 	else
-		-- Recharge the nitro level
-		local amount = 1 / engineParameters.nitroRechargeTime
+		-- Recharge the nitro level slowly
+		local amount: number = 1 / engineParameters.nitroRechargeTime
 		engineNitro = math.min(engineNitro + amount * deltaTime, 1)
 	end
 	engine:SetAttribute(Constants.ENGINE_NITRO_ATTRIBUTE, engineNitro)
-
 	engine:SetAttribute(Constants.NITRO_ENABLED_ATTRIBUTE, isNitroEnabled)
 
 	-- Update the nitro constraint
-	engine.NitroVelocity.Enabled = isNitroEnabled
-	engine.NitroVelocity.VectorVelocity = Vector3.new(0, 0, -engineParameters.nitroMaxSpeed)
+	NitroVelocity.Enabled = isNitroEnabled
+	NitroVelocity.VectorVelocity = Vector3.new(0, 0, -engineParameters.nitroMaxSpeed)
 end
 
 -- Update the car's target speed and wheel motors' torque and angular velocity
-local function updateEngine(deltaTime: number)
-	local handBrakeInput = inputs:GetAttribute(Constants.HAND_BRAKE_INPUT_ATTRIBUTE)
-	local throttleInput = math.clamp(inputs:GetAttribute(Constants.THROTTLE_INPUT_ATTRIBUTE), -1, 1)
-	local throttleDirection = math.sign(throttleInput)
-	local engineSpeed = engine:GetAttribute(Constants.ENGINE_SPEED_ATTRIBUTE)
-	local isNitroEnabled = engine:GetAttribute(Constants.NITRO_ENABLED_ATTRIBUTE)
-	local maxSpeed = math.max(engineParameters.forwardMaxSpeed, engineParameters.reverseMaxSpeed)
-	local targetSpeed = throttleInput
-		* (if throttleDirection >= 0 then engineParameters.forwardMaxSpeed else engineParameters.reverseMaxSpeed)
-	local forwardSpeed = getChassisForwardSpeed()
-	local isBraking = throttleDirection ~= 0
+local WheelFRMotor: CylindricalConstraint = engine:WaitForChild('WheelFRMotor') :: CylindricalConstraint
+local WheelFLMotor: CylindricalConstraint = engine:WaitForChild('WheelFLMotor') :: CylindricalConstraint
+local WheelRRMotor: CylindricalConstraint = engine:WaitForChild('WheelRRMotor') :: CylindricalConstraint
+local WheelRLMotor: CylindricalConstraint = engine:WaitForChild('WheelRLMotor') :: CylindricalConstraint
+
+local function updateEngine(deltaTime: number): ()
+	local handBrakeInput: unknown? = inputs:GetAttribute(Constants.HAND_BRAKE_INPUT_ATTRIBUTE)
+	local boolHandBrakeInput: boolean = handBrakeInput ~= nil and typeof(handBrakeInput) == "boolean" and handBrakeInput :: boolean
+
+	local throttleInput: number? = ReadNumberAttribute(inputs, Constants.THROTTLE_INPUT_ATTRIBUTE)
+	if throttleInput == nil then return end
+	local nThrottleInput: number = math.clamp(throttleInput :: number, -1, 1)
+	local throttleDirection: number = math.sign(nThrottleInput)
+
+	local engineSpeed: number? = ReadNumberAttribute(engine, Constants.ENGINE_SPEED_ATTRIBUTE)
+	if engineSpeed == nil then return end
+
+	local isNitroEnabled: unknown? = engine:GetAttribute(Constants.NITRO_ENABLED_ATTRIBUTE)
+	local boolIsNitroEnabled: boolean = isNitroEnabled ~= nil and typeof(isNitroEnabled) == "boolean" and isNitroEnabled :: boolean
+
+	local maxSpeed: number = math.max(engineParameters.forwardMaxSpeed, engineParameters.reverseMaxSpeed)
+	local targetSpeed: number = nThrottleInput * (if throttleDirection >= 0 then engineParameters.forwardMaxSpeed else engineParameters.reverseMaxSpeed)
+	local forwardSpeed: number = getChassisForwardSpeed()
+	local isBraking: boolean = throttleDirection ~= 0
 		and math.abs(forwardSpeed) > 1
 		and throttleDirection ~= math.sign(forwardSpeed)
-	local acceleration = engineParameters.acceleration
+	local acceleration: number = engineParameters.acceleration
 
 	-- Adjust the acceleration based on whether the car is using nitro, braking, or slowing down
-	if isNitroEnabled then
+	if boolIsNitroEnabled then
 		acceleration = engineParameters.nitroAcceleration
 		targetSpeed = engineParameters.nitroMaxSpeed
 	elseif isBraking then
@@ -126,120 +155,138 @@ local function updateEngine(deltaTime: number)
 	engine:SetAttribute(Constants.ENGINE_SPEED_ATTRIBUTE, engineSpeed)
 
 	-- Calculate the torque and angular velocity required to reach the target linear velocity
-	local chassisSpeed = getChassisForwardSpeed()
-	local torqueAlpha = math.min(chassisSpeed, maxSpeed) / maxSpeed
-	local torque = lerp(engineParameters.minSpeedTorque, engineParameters.maxSpeedTorque, torqueAlpha)
-	if isNitroEnabled then
-		torque = engineParameters.nitroTorque
-	end
-	local studsSpeed = Units.milesPerHourToStudsPerSecond(engineSpeed)
-	local angularVelocity = studsSpeed / wheelRadius
+	local chassisSpeed: number = getChassisForwardSpeed()
+	local torqueAlpha: number = math.min(chassisSpeed, maxSpeed) / maxSpeed
+	local torque: number = lerp(engineParameters.minSpeedTorque, engineParameters.maxSpeedTorque, torqueAlpha)
+	if boolIsNitroEnabled then torque = engineParameters.nitroTorque end
+	local studsSpeed: number = Units.milesPerHourToStudsPerSecond(engineSpeed)
+	local angularVelocity: number = studsSpeed / wheelRadius
 
 	-- Update the wheel motor constraints
-	engine.WheelFRMotor.AngularVelocity = angularVelocity
-	engine.WheelFRMotor.MotorMaxTorque = torque
-	engine.WheelFLMotor.AngularVelocity = -angularVelocity
-	engine.WheelFLMotor.MotorMaxTorque = torque
-	if handBrakeInput then
-		engine.WheelRRMotor.AngularVelocity = 0
-		engine.WheelRRMotor.MotorMaxTorque = engineParameters.handBrakeTorque
-		engine.WheelRLMotor.AngularVelocity = 0
-		engine.WheelRLMotor.MotorMaxTorque = engineParameters.handBrakeTorque
+	WheelFRMotor.AngularVelocity = angularVelocity
+	WheelFRMotor.MotorMaxTorque = torque
+	WheelFLMotor.AngularVelocity = -angularVelocity
+	WheelFLMotor.MotorMaxTorque = torque
+	if boolHandBrakeInput then
+		WheelRRMotor.AngularVelocity = 0
+		WheelRRMotor.MotorMaxTorque = engineParameters.handBrakeTorque
+		WheelRLMotor.AngularVelocity = 0
+		WheelRLMotor.MotorMaxTorque = engineParameters.handBrakeTorque
 	else
-		engine.WheelRRMotor.AngularVelocity = angularVelocity
-		engine.WheelRRMotor.MotorMaxTorque = torque
-		engine.WheelRLMotor.AngularVelocity = -angularVelocity
-		engine.WheelRLMotor.MotorMaxTorque = torque
+		WheelRRMotor.AngularVelocity = angularVelocity
+		WheelRRMotor.MotorMaxTorque = torque
+		WheelRLMotor.AngularVelocity = -angularVelocity
+		WheelRLMotor.MotorMaxTorque = torque
 	end
 end
 
 -- Update the steering rack position based on the steering input and current speed of the car
-local function updateSteering()
-	local steeringInput = math.clamp(inputs:GetAttribute(Constants.STEERING_INPUT_ATTRIBUTE), -1, 1)
-	local maxSpeed = math.max(engineParameters.forwardMaxSpeed, engineParameters.reverseMaxSpeed)
-	local speed = math.min(getChassisForwardSpeed(), maxSpeed)
+local SteeringRack: PrismaticConstraint = steering:WaitForChild('SteeringRack') :: PrismaticConstraint
+
+local function updateSteering(): ()
+	local steeringInput: number? = ReadNumberAttribute(inputs, Constants.STEERING_INPUT_ATTRIBUTE)
+	if steeringInput == nil then return end
+	local nSteeringInput: number = steeringInput :: number
+	local maxSpeed: number = math.max(engineParameters.forwardMaxSpeed, engineParameters.reverseMaxSpeed)
+	local speed: number = math.min(getChassisForwardSpeed(), maxSpeed)
 	-- Steering is reduced at higher speeds to provide smoother handling
-	local steeringFactor = math.max(1 - (speed / maxSpeed) * steeringParameters.steeringReduction, 0)
-	local steeringAmount = steeringInput * steeringFactor
+	local steeringFactor: number = math.max(1 - (speed / maxSpeed) * steeringParameters.steeringReduction, 0)
+	local steeringAmount: number = nSteeringInput * steeringFactor
 
 	if steeringAmount > 0 then
-		steering.SteeringRack.TargetPosition = steeringAmount * steering.SteeringRack.LowerLimit
+		SteeringRack.TargetPosition = steeringAmount * SteeringRack.LowerLimit
 	else
-		steering.SteeringRack.TargetPosition = -steeringAmount * steering.SteeringRack.UpperLimit
+		SteeringRack.TargetPosition = -steeringAmount * SteeringRack.UpperLimit
 	end
 end
 
-local function updateWheelFriction()
-	for _, wheelPart in wheelParts do
+local function updateWheelFriction(): ()
+	for _, wheelPart: BasePart in wheelParts do
 		-- Find the difference between the wheel's actual linear speed and the speed it should be moving
 		-- based on its current angular velocity.
-		local speed = wheelPart.AssemblyLinearVelocity.Magnitude
-		local angularVelocity = wheelPart.AssemblyAngularVelocity
-		local targetSpeed = wheelRadius * angularVelocity.Magnitude
-		local speedDiff = math.abs(speed - targetSpeed)
+		local speed: number = wheelPart.AssemblyLinearVelocity.Magnitude
+		local angularVelocity: Vector3 = wheelPart.AssemblyAngularVelocity
+		local targetSpeed: number = wheelRadius * angularVelocity.Magnitude
+		local speedDiff: number = math.abs(speed - targetSpeed)
 
-		local isKineticFriction = speedDiff > wheelParameters.slipThreshold
-		local friction = if isKineticFriction then wheelParameters.kineticFriction else wheelParameters.staticFriction
-		wheelPart.CustomPhysicalProperties =
-			PhysicalProperties.new(wheelParameters.density, friction, wheelParameters.elasticity)
+		local isKineticFriction: boolean = speedDiff > wheelParameters.slipThreshold
+		local friction: number = if isKineticFriction then wheelParameters.kineticFriction else wheelParameters.staticFriction
+		wheelPart.CustomPhysicalProperties = PhysicalProperties.new(wheelParameters.density, friction, wheelParameters.elasticity)
 	end
 end
 
-local function initialize()
+local function initialize(): ()
 	-- Cache all parameters in tables and update them when the corresponding Attribute updates.
 	-- Parameters aren't going to change very often so there's no reason to call :GetAttribute() constantly.
-	for parameter in engineParameters do
-		engine:GetAttributeChangedSignal(parameter):Connect(function()
-			engineParameters[parameter] = engine:GetAttribute(parameter)
+	for parameter: string in engineParameters do
+		engine:GetAttributeChangedSignal(parameter):Connect(function (): ()
+			local value: unknown? = engine:GetAttribute(parameter)
+			if value ~= nil and typeof(value) == 'number' then
+				engineParameters[parameter] = value
+			end
 		end)
-		engineParameters[parameter] = engine:GetAttribute(parameter)
+		local nvalue: unknown? = engine:GetAttribute(parameter)
+		if nvalue ~= nil and typeof(nvalue) == 'number' then
+			engineParameters[parameter] = nvalue
+		end
 	end
 
-	for parameter in steeringParameters do
-		steering:GetAttributeChangedSignal(parameter):Connect(function()
-			steeringParameters[parameter] = steering:GetAttribute(parameter)
+	for parameter: string in steeringParameters do
+		steering:GetAttributeChangedSignal(parameter):Connect(function(): ()
+			local value: unknown? = steering:GetAttribute(parameter)
+			if value ~= nil and typeof(value) == 'number' then
+				steeringParameters[parameter] = value
+			end
 		end)
-		steeringParameters[parameter] = steering:GetAttribute(parameter)
+		local nvalue: unknown? = steering:GetAttribute(parameter)
+		if nvalue ~= nil and typeof(nvalue) == 'number' then
+			steeringParameters[parameter] = nvalue
+		end
 	end
 
-	for parameter in wheelParameters do
-		wheels:GetAttributeChangedSignal(parameter):Connect(function()
-			wheelParameters[parameter] = wheels:GetAttribute(parameter)
+	for parameter: string in wheelParameters do
+		wheels:GetAttributeChangedSignal(parameter):Connect(function(): ()
+			local value: unknown? = wheels:GetAttribute(parameter)
+			if value ~= nil and typeof(value) == 'number' then
+				wheelParameters[parameter] = value
+			end
 		end)
-		wheelParameters[parameter] = wheels:GetAttribute(parameter)
+		local nvalue: unknown? = wheels:GetAttribute(parameter)
+		if nvalue ~= nil and typeof(nvalue) == 'number' then
+			wheelParameters[parameter] = nvalue
+		end
 	end
 end
 
 local Controller = {}
 
-function Controller:reset()
+function Controller:reset(): ()
 	-- Reset engine attributes
 	engine:SetAttribute(Constants.ENGINE_SPEED_ATTRIBUTE, 0)
 	engine:SetAttribute(Constants.ENGINE_NITRO_ATTRIBUTE, 1)
 	-- Reset motors
-	engine.WheelFRMotor.AngularVelocity = 0
-	engine.WheelFRMotor.MotorMaxTorque = engineParameters.minSpeedTorque
-	engine.WheelFLMotor.AngularVelocity = 0
-	engine.WheelFLMotor.MotorMaxTorque = engineParameters.minSpeedTorque
-	engine.WheelRRMotor.AngularVelocity = 0
-	engine.WheelRRMotor.MotorMaxTorque = engineParameters.minSpeedTorque
-	engine.WheelRLMotor.AngularVelocity = 0
-	engine.WheelRLMotor.MotorMaxTorque = engineParameters.minSpeedTorque
+	WheelFRMotor.AngularVelocity = 0
+	WheelFRMotor.MotorMaxTorque = engineParameters.minSpeedTorque
+	WheelFLMotor.AngularVelocity = 0
+	WheelFLMotor.MotorMaxTorque = engineParameters.minSpeedTorque
+	WheelRRMotor.AngularVelocity = 0
+	WheelRRMotor.MotorMaxTorque = engineParameters.minSpeedTorque
+	WheelRLMotor.AngularVelocity = 0
+	WheelRLMotor.MotorMaxTorque = engineParameters.minSpeedTorque
 	-- Reset nitro
-	engine.NitroVelocity.Enabled = false
+	NitroVelocity.Enabled = false
 	-- Reset steering
-	steering.SteeringRack.TargetPosition = 0
+	SteeringRack.TargetPosition = 0
 	-- Reset wheel friction
-	for _, wheelPart in wheelParts do
-		wheelPart.CustomPhysicalProperties =
-			PhysicalProperties.new(wheelParameters.density, wheelParameters.staticFriction, wheelParameters.elasticity)
+	for _, wheelPart: BasePart in wheelParts do
+		wheelPart.CustomPhysicalProperties = PhysicalProperties.new(wheelParameters.density, wheelParameters.staticFriction, wheelParameters.elasticity)
 	end
 end
 
-function Controller:update(deltaTime: number, attributes)
+function Controller:update(deltaTime: number): ()
 	updateNitro(deltaTime)
-	updateEngine(deltaTime, attributes)
-	updateSteering(attributes)
+	updateEngine(deltaTime)
+	updateSteering()
 	updateWheelFriction()
 end
 
