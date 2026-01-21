@@ -1,24 +1,22 @@
 local Workspace = game:GetService('Workspace')
-local CarsSpawnersFolder = Workspace:WaitForChild('CarSpawns')
-local CarsFolder = Workspace:WaitForChild('Cars')
+local CollectionService = game:GetService('CollectionService')
+local CarsFolder: Instance = Workspace:WaitForChild('Cars')
 
 local ServerStorage = game:GetService('ServerStorage')
-local CarModels = ServerStorage:WaitForChild('CarModels')
-local CarScripts = script.Parent.Parent:WaitForChild('Car'):WaitForChild('CarScripts')
+local CarModels: Instance = ServerStorage:WaitForChild('CarModels')
+local CarScripts: Folder = script.Parent.Parent:WaitForChild('Car'):WaitForChild('CarScripts')
 
 local CarsController = {}
 
 CarsController.GetSpawns = function (): { BasePart }
   local Spawns: { BasePart } = {}
-  for _, spawn: Instance in ipairs(CarsSpawnersFolder:GetChildren()) do
-    if spawn:IsA('BasePart') then
-      table.insert(Spawns, spawn)
-    end
+  for _, spawn: Instance in ipairs(CollectionService:GetTagged('SPAWN')) do
+    if spawn:IsA('BasePart') then table.insert(Spawns, spawn) end
   end
   return Spawns
 end
 
-CarsController.PickSpawns = function (count: number): { BasePart }
+CarsController.PickSpawns = function (count: number, ignoreWithParts: { Instance }?): { BasePart }
   local r: Random = Random.new()
   local AllSpawns: { BasePart } = CarsController.GetSpawns()
   local PickedSpawns: { BasePart } = {}
@@ -32,7 +30,24 @@ CarsController.PickSpawns = function (count: number): { BasePart }
       local pickedSpawnI: number = r:NextInteger(1, #AllSpawns)
       pickedSpawn = AllSpawns[pickedSpawnI]
       table.remove(AllSpawns, pickedSpawnI)
-      if pickedSpawn ~= nil then break end
+      if pickedSpawn == nil then continue end
+
+      if ignoreWithParts ~= nil then
+        local hasConflict: boolean = false
+        for _, touchingPart: Instance in ipairs(pickedSpawn:GetTouchingParts()) do
+          for _, parent: Instance in ipairs(ignoreWithParts) do
+            if touchingPart:IsDescendantOf(parent) then
+              hasConflict = true
+              break
+            end
+          end
+          if hasConflict then break end
+        end
+        if hasConflict then
+          pickedSpawn = nil
+          continue
+        end
+      end
     end
 
     if pickedSpawn == nil then continue end
@@ -80,7 +95,7 @@ type RayConfig = {
 }
 
 CarsController.GetRaycasts = function (car: Model): { number }?
-  local Config = CarsController.LoadConfig(car)
+  local Config: any = CarsController.LoadConfig(car)
   if Config == nil then return end
 
   local ConfigRays: { RayConfig } = Config.Rays
@@ -100,7 +115,7 @@ CarsController.GetRaycasts = function (car: Model): { number }?
       params.FilterDescendantsInstances = { CarsFolder }
     else
       local Env: unknown? = car:GetAttribute('ENV')
-      local SameEnvCars: { Model } = {}
+      local SameEnvCars: { Instance } = {}
       if Env ~= nil and typeof(Env) == 'string' then
         for _, otherCar: Instance in pairs(CarsFolder:GetChildren()) do
           if otherCar:IsA('Model') and otherCar:GetAttribute('ENV') == Env then
@@ -115,7 +130,8 @@ CarsController.GetRaycasts = function (car: Model): { number }?
 
     local hitPosition: Vector3 = if raycastResult ~= nil then raycastResult.Position else targetPos
     
-    local part = Instance.new("Part")
+    --[[ Debug parts
+    local part: Part = Instance.new("Part")
     part.CanCollide = false
     part.Anchored = true
     part.CanTouch = false
@@ -126,6 +142,7 @@ CarsController.GetRaycasts = function (car: Model): { number }?
     part.CFrame = CFrame.lookAt((hitPosition + startPos) / 2, hitPosition)
     part.Transparency = 0.5
     task.defer(function(): () task.wait(); part:Destroy() end)
+    ]]
 
     local Distance: number = (hitPosition - startPos).Magnitude
     table.insert(Result, Distance / rc.Direction.Magnitude)

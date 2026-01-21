@@ -11,7 +11,7 @@ CheckpointsController.LoadCheckpoints = function (CheckpointsParent: Instance): 
       table.insert(newCheckpoints, Instance)
     end
   end
-  table.sort(newCheckpoints, function (a, b) return tonumber(a.Name) < tonumber(b.Name) end)
+  table.sort(newCheckpoints, function (a, b): boolean return tonumber(a.Name) < tonumber(b.Name) end)
   CheckpointsController.Checkpoints = newCheckpoints
 end
 
@@ -23,7 +23,7 @@ CheckpointsController.GetSizeTo = function (CheckpointId: number): number
   
   local Prev: BasePart = CheckpointsController.Checkpoints[1]
   for i = 1, CheckpointId do
-    local actualIndex = ((i - 1) % #CheckpointsController.Checkpoints) + 1 -- We should also count from the last checkpoint to the first checkpoint (start)
+    local actualIndex: number = ((i - 1) % #CheckpointsController.Checkpoints) + 1 -- We should also count from the last checkpoint to the first checkpoint (start)
     local Next: BasePart = CheckpointsController.Checkpoints[actualIndex]
     Size += (Next.Position - Prev.Position).Magnitude
     Prev = Next

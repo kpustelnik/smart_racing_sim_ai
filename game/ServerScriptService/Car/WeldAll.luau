@@ -2,7 +2,7 @@
 -- FIN
 -- Utility script
 local toWeld: Instance? = nil
-local weldto: Instance? = nil
+local weldto: BasePart? = nil
 if toWeld == nil or weldto == nil then error("Missing data") end
 
 for _, p: Instance in ipairs(toWeld:GetDescendants()) do
