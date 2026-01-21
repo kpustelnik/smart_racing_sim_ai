@@ -1,4 +1,5 @@
 --!strict
+-- FIN
 local RECOLOR_TAG: string = 'Recolor'
 
 return function (model: Model, color: Color3): ()

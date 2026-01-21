@@ -1,4 +1,5 @@
 --!nonstrict
+-- FIN
 --  Utility script
 local toWeld = game.Workspace.Truck.Body
 local weldto = game.Workspace.Truck.Chassis
