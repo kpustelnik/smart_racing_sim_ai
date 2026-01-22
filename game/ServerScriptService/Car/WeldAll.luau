@@ -1,4 +1,4 @@
---!nonstrict
+--!strict
 -- FIN
 -- Utility script
 local toWeld: Instance? = nil
