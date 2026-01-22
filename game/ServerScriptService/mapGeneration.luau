@@ -4,17 +4,16 @@ local SpawnerPart = Map:WaitForChild("Spawner")
 local PrebuiltObjects = Map:WaitForChild('Prebuilt')
 local Terrain = Workspace.Terrain
 
+-- TODO
 
 local PointsNumber: number = 120
-local minimumPoints = 30
-local targetPoints = 40
-local minimumDistance = 80
-local maxDistance = 500
-local trimPercentage = 0.6
-local pathDistance = 100
-local minPrebuilt = 4
-
-
+local minimumPoints: number = 30
+local targetPoints: number = 40
+local minimumDistance: number = 80
+local maxDistance: number = 500
+local trimPercentage: number = 0.6
+local pathDistance: number = 100
+local minPrebuilt: number = 4
 
 local angleBetween = function (a: Vector3, b: Vector3): number
   return math.atan2(a.X * b.Z - a.Z * b.X, a.X * b.X + a.Z * b.Z)
