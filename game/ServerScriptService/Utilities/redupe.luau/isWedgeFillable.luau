@@ -30,7 +30,7 @@ local function getTestPart(position: Vector3): Part
   return cp
 end
 
-local function isWedgeFillable(a: Part): boolean
+local function isWedgeFillable(a: BasePart): boolean
 	for _, corner: Vector3 in corners do
 		local offset: Vector3 = corner * (a.Size * 0.5 - Vector3.one * WEDGE_FILLABLE_CLOSENESS_TO_CORNER)
 		local worldPoint: Vector3 = a.CFrame:PointToWorldSpace(offset)

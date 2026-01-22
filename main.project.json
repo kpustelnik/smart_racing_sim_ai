@@ -7,6 +7,13 @@
       "$className": "ServerScriptService",
       "$path": "game/ServerScriptService"
     },
+    "ReplicatedFirst": {
+      "$className": "ReplicatedFirst",
+      "Packages": {
+        "$className": "Folder",
+        "$path": "Packages"
+      }
+    },
     "StarterPlayer": {
       "StarterPlayerScripts": {
         "$path": "game/StarterPlayer/StarterPlayerScripts"

@@ -29,18 +29,18 @@ local orientation2d = function (p: Vector3, q: Vector3, r: Vector3): number
   end
 end
 local intersects = function (p1: Vector3, q1: Vector3, p2: Vector3, q2: Vector3): boolean
-  local o1 = orientation2d(p1, q1, p2)
-  local o2 = orientation2d(p1, q1, q2)
-  local o3 = orientation2d(p2, q2, p1)
-  local o4 = orientation2d(p2, q2, q1)
+  local o1: number = orientation2d(p1, q1, p2)
+  local o2: number = orientation2d(p1, q1, q2)
+  local o3: number = orientation2d(p2, q2, p1)
+  local o4: number = orientation2d(p2, q2, q1)
 
   if o1 ~= o2 and o3 ~= o4 then return true end
   return false
 end
 local getPathDistance = function (s: Vector3, e: Vector3, point: Vector3): number
   local ray = Ray.new(s, e-s).Unit
-  local cp = ray:ClosestPoint(point)
-  local mag = (s - e).Magnitude
+  local cp: Vector3 = ray:ClosestPoint(point)
+  local mag: number = (s - e).Magnitude
   if (cp - s).Magnitude > mag then
     return (e - point).Magnitude
   elseif (cp - e).Magnitude > mag then
