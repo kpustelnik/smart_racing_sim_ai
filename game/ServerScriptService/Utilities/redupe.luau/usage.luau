@@ -269,26 +269,143 @@ local function updatePlacement(): ({{ Instance }}?, CFrame?)
   local b: Vector3 = target.CFrame.Position
   local nxt: Vector3 = b + target.CFrame.lookVector * 200
 
-  local approxLength: number = 0
-  do
-    local cPoint: Vector3 = a
-    local points: number = 200
-    for i = 0, points do
-      local t: number = i / points
-      local dPoint: Vector3 = catmullRom(prv, a, b, nxt, t)
-      approxLength += (dPoint - cPoint).Magnitude
-      cPoint = dPoint
-    end
-  end
-
   local sizeOnAxis: number = (axis * localBoundingBoxSize).Magnitude
-  local copyCount: number = math.floor(approxLength / sizeOnAxis + 0.5) + 1
-  assert(copyCount == copyCount, "NaN")
 
   local placements: { bendPlacement.Placement } = {} :: { bendPlacement.Placement }
-  local deltaSize: Vector3 = localBoundingBoxSize --[[ END SIZE ]] - localBoundingBoxSize
+  local reversePlacements: { bendPlacement.Placement } = {} :: { bendPlacement.Placement }
+
+  local deltaSize: Vector3 = localBoundingBoxSize --[[ TODO: May add end size ]] - localBoundingBoxSize
+  -- TODO: End Delta position (offset from the main axis may also be put here)
+  local probedPoints = {}
+  for t = 0, 1, 0.001 do
+    table.insert(probedPoints, catmullRom(prv, a, b, nxt, t))
+  end
+  local t1 = #probedPoints
+  for t = 1.001, 1.1 do table.insert(probedPoints, catmullRom(prv, a, b, nxt, t)) end
+  local endCF = CFrame.lookAt(probedPoints[t1], probedPoints[t1+1])
+
   local lastPos: Vector3 = startCF.Position
-  local t: number = 0
+  local reverseLastPos: Vector3 = endCF.Position
+
+  local ct: number = 1
+  local rct: number = t1
+  local runningPositionNow: CFrame = startCF
+  local reverseRunningPositionNow: CFrame = endCF
+  while true do
+    -- Find the start point
+    while true do 
+      ct += 1
+      if ct > rct then break end
+      if (probedPoints[ct] - lastPos).Magnitude > sizeOnAxis * 1 then
+        break
+      end
+    end
+    if ct > rct then break end
+
+    if #placements > 0 then
+      runningPositionNow *= placements[#placements].Offset
+      runningPositionNow = runningPositionNow:Orthonormalize()
+    end
+
+    local copySize: Vector3 = localBoundingBoxSize + (deltaSize * ct / t1)
+    local prevSize = localBoundingBoxSize
+    if #placements > 0 then prevSize = placements[#placements].Size end
+    local placement: bendPlacement.Placement = {
+      BoundsOffset = boundsOffset,
+      Size = copySize,
+      Offset = CFrame.new(),
+      PreviousSize = prevSize,
+    }
+    
+    local originalOffset = CFrame.new(-axis * sizeOnAxis)
+    local testPosition: Vector3
+    while true do -- Bend and check if better splice position exists
+      placement.Offset = originalOffset
+      local curPos = probedPoints[ct]
+      local nxtPos = probedPoints[math.clamp(ct + 1, 1, #probedPoints)]
+      local cf = CFrame.lookAt(curPos, nxtPos)
+      local rotation = runningPositionNow.Rotation:ToObjectSpace(cf.Rotation)
+      bendPlacement(placement, axis, rotation, -1, 0, 1)
+      testPosition = (runningPositionNow * placement.Offset).Position
+      local anyAffected = false
+      while ct < rct and (testPosition - probedPoints[ct]).Magnitude > (testPosition - probedPoints[ct + 1]).Magnitude do
+        ct += 1
+        anyAffected = true
+      end
+      if not anyAffected then break end 
+    end
+    if ct > rct then break end
+    placement.Offset += Vector3.new(0, probedPoints[ct].Y - testPosition.Y, 0)
+    placement.CFrame = runningPositionNow * placement.Offset
+    table.insert(placements, placement)
+    lastPos = probedPoints[ct]
+
+    -- Find the reverse point
+    while true do 
+      rct -= 1
+      if ct > rct then break end
+      if (probedPoints[rct] - reverseLastPos).Magnitude > sizeOnAxis * 1 then
+        reverseLastPos = probedPoints[rct]
+        break
+      end
+    end
+    if ct > rct then break end
+
+    if #reversePlacements > 0 then
+      reverseRunningPositionNow *= reversePlacements[#reversePlacements].Offset
+      reverseRunningPositionNow = reverseRunningPositionNow:Orthonormalize()
+    end
+
+    local reverseCopySize: Vector3 = localBoundingBoxSize + (deltaSize * rct / t1)
+    local prevReverseCopySize: Vector3 = localBoundingBoxSize + (deltaSize * (rct - 1) / t1)
+    local reversePlacement: bendPlacement.Placement ={
+      BoundsOffset = boundsOffset,
+      Size = reverseCopySize,
+      Offset = CFrame.new(),
+      PreviousSize = prevReverseCopySize,
+    }
+    
+    local reverseOriginalOffset = CFrame.new(axis * sizeOnAxis)
+    while true do -- Bend and check if better splice position exists
+      reversePlacement.Offset = reverseOriginalOffset
+      local curPos = probedPoints[rct]
+      local nxtPos = probedPoints[math.clamp(rct + 1, 1, #probedPoints)]
+      local cf = CFrame.lookAt(curPos, nxtPos)
+      local rotation = reverseRunningPositionNow.Rotation:ToObjectSpace(cf.Rotation)
+      bendPlacement(reversePlacement, -axis, rotation, -1, 0, 1)
+      testPosition = (reverseRunningPositionNow * reversePlacement.Offset).Position
+      local anyAffected = false
+      while ct < rct and (testPosition - probedPoints[rct]).Magnitude > (testPosition - probedPoints[rct - 1]).Magnitude do
+        rct -= 1
+        anyAffected = true
+      end
+      if not anyAffected then break end 
+    end
+    if ct > rct then break end
+    reversePlacement.Offset += Vector3.new(0, probedPoints[rct].Y - testPosition.Y, 0)
+    reversePlacement.CFrame = reverseRunningPositionNow * reversePlacement.Offset
+    table.insert(reversePlacements, reversePlacement)
+    reverseLastPos = probedPoints[rct]
+
+    --[[
+    if copySize.X > 0.001 and copySize.Y > 0.001 and copySize.Z > 0.001 then dont put
+    end]]
+  end
+  if #placements > 1 then table.remove(placements, #placements) end
+  print(placements, reversePlacements)
+
+  for i = #reversePlacements, 1, -1 do
+    local rp = reversePlacements[i]
+    if i == #reversePlacements then -- Remove overlap in the last offset
+      local lastPlacement = placements[#placements]
+      rp.Offset = lastPlacement.CFrame:Inverse() * reversePlacements[i].CFrame
+    else
+      rp.Offset = rp.Offset:Inverse()
+    end
+    table.insert(placements, rp)
+  end
+
+  --[[
   for i = 1, copyCount - 1 do
     local mid: Vector3?
     while true do
@@ -326,32 +443,7 @@ local function updatePlacement(): ({{ Instance }}?, CFrame?)
       })
     end
   end
-
-  -- If the user places many copies with rotation, some of the later
-  -- copies may exactly overlap earlier copies. Establish where this
-  -- starts happening, or infinity if it does not.
-  --local redundantLimit: number = computeRedundantRotationLimit()
-
-  -- Convert positions to offsets and apply bending
-  local runningPositionNow: CFrame = startCF
-  for i: number, placement in placements do
-    local rotation = CFrame.new()
-    if i == 1 then
-      placement.Offset = startCF:ToObjectSpace(placement.RealCFrame)
-      placement.PreviousSize = localBoundingBoxSize
-    else
-      runningPositionNow *= placements[i - 1].Offset
-      runningPositionNow = runningPositionNow:Orthonormalize()
-
-      placement.Offset = CFrame.new(-axis * sizeOnAxis)
-      placement.PreviousSize = placements[i - 1].Size
-      rotation = runningPositionNow.Rotation:ToObjectSpace(placement.RealCFrame.Rotation)
-    end
-
-    -- Do the bending
-    -- TODO: Change the angles
-    bendPlacement(placement, axis, rotation, -1, 0, 1)
-  end
+  ]]
 
   local doResizeAlign = shouldResizeAlign()
 
@@ -378,7 +470,7 @@ local function updatePlacement(): ({{ Instance }}?, CFrame?)
       Size = placement.Size,
     }
 
-    if doResizeAlign and false then
+    if doResizeAlign and true then
       task.wait(0.05)
       local resizeAlignResults = resizeAlignPairs(lastCopy, thisCopy, lastBasis, thisInfo, axis, resizeAlignPairsCache)
       for j, resizeAlignResult in resizeAlignResults do
