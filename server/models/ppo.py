@@ -123,6 +123,7 @@ class PettingZooWSEnv(ParallelEnv):
         terminations = {}
         truncations = {}
         infos = {}
+        print(self.state_dim)
 
         for agent in self.agents:
             agent_data = data_map.get(agent)
@@ -132,13 +133,15 @@ class PettingZooWSEnv(ParallelEnv):
                 rewards[agent] = float(agent_data.get('reward', 0.0))
                 terminations[agent] = bool(agent_data.get('terminated', False))
                 truncations[agent] = bool(agent_data.get('truncated', False))
+
+                infos[agent] = {
+                    "terminal_observation": np.array(agent_data.get('terminal_obs', np.zeros(self.state_dim)), dtype=np.float32)
+                }
             else:
                 observations[agent] = np.zeros(self.state_dim, dtype=np.float32)
                 rewards[agent] = 0.0
                 terminations[agent] = False
                 truncations[agent] = False
-
-            infos[agent] = {}
 
         return observations, rewards, terminations, truncations, infos
 
