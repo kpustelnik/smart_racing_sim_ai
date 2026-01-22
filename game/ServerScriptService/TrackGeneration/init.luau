@@ -11,7 +11,7 @@ type Point = Types.Point
 local PointsNumber: number = 120
 local minimumPoints: number = 30
 local targetPoints: number = 40
-local minimumDistance: number = 80
+local minimumDistance: number = 130
 local maxDistance: number = 500
 local trimPercentage: number = 0.6
 local pathDistance: number = 100
@@ -270,7 +270,7 @@ end
 print("Finished")
 genPath(finalPath)
 
-local Finalizer = require(script:WaitForChild("Finalizers"):WaitForChild("Simple"))
+local Finalizer = require(script:WaitForChild("Finalizers"):WaitForChild("Main"))
 Finalizer(finalPath, pathFolder)
 
 return {}

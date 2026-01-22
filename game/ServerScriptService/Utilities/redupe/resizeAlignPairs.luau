@@ -413,9 +413,19 @@ local function filterChildList(children: {Instance}): {Instance}
 end
 
 local function resizeAlignPairsRecursive(a: {Instance}, b: {Instance}, aBasis: ResizeAlignInfo, bBasis: ResizeAlignInfo, axis: Vector3, cache: ResizeAlignPairsCache, cacheIndex: number, resultList: {Instance}?): number
-	assert(#a == #b, "Mismatched number of instances to resize-align recursive")
+	-- assert(#a == #b, "Mismatched number of instances to resize-align recursive")
 	for i: number, itemA: Instance in a do
-		local itemB: Instance = b[i]
+		local itemB: Instance? = nil
+		for _, x in b do
+			if x.Name == itemA.Name then
+				itemB = x
+				break
+			end
+		end
+		if itemB == nil then
+			warn("Item missing")
+			continue
+		end
 		if itemA.ClassName ~= itemB.ClassName then
 			warn("Mismatched instance types in resize-align:", itemA.ClassName, itemB.ClassName)
 			continue

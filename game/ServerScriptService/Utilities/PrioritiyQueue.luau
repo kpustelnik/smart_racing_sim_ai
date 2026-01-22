@@ -1,4 +1,4 @@
---!nonstrict
+--!strict
 
 --[[
 https://gist.github.com/LukeMS/89dc587abd786f92d60886f4977b1953

@@ -16,6 +16,10 @@ local createGhostPreview = require(Redupe:WaitForChild("createGhostPreview"))
 local bendPlacement = require(Redupe:WaitForChild("bendPlacement"))
 local resizeAlignPairs = require(Redupe:WaitForChild("resizeAlignPairs"))
 
+local Checkpoints = Instance.new("Folder")
+Checkpoints.Name = "Checkpoints"
+Checkpoints.Parent = Workspace
+
 --[[
 	Micro-optimized code for computing a local space and the global space
 	bounding box for a set of parts and attachments as fast as possible.
@@ -94,6 +98,25 @@ local function catmullRom(p0: Vector3, p1: Vector3, p2: Vector3, p3: Vector3, t:
 end
 
 return function (path: { Types.Point }, pathFolder: Folder): ()
+  local checkpointIndex = 0
+  local function createCheckpoint(cf)
+    local i = checkpointIndex
+    checkpointIndex += 1
+
+    local checkpointPart = Instance.new("Part")
+    checkpointPart.Name = tostring(i)
+    checkpointPart.Color = Color3.new(1, 1, 0)
+    checkpointPart.Material = Enum.Material.Neon
+    checkpointPart.Size = Vector3.new(20, 30, 2)
+    checkpointPart.CFrame = cf * CFrame.new(0, 0, 0)
+    checkpointPart.Anchored = true
+    checkpointPart.Transparency = 0.5
+    checkpointPart.CanCollide = false
+    checkpointPart.CanQuery = false
+    checkpointPart.CanTouch = false
+    checkpointPart.Parent = Checkpoints
+  end
+
   local prev = nil
   local prevBasis = nil
   for i, curPoint: Types.Point in ipairs(path) do
@@ -107,7 +130,7 @@ return function (path: { Types.Point }, pathFolder: Folder): ()
       local a = curPoint.Position
       local b = nextPoint.Position
       local nxt = if nextPoint.Direction ~= nil then nextPoint.Position - 400 * Vector3.new(nextPoint.Direction.X, 0, nextPoint.Direction.Z) elseif i + 2 <= #path then path[i+2].Position else nextPoint.Position
-      
+
       local cTrackBase = TrackBase:Clone()
       local TrackBaseTargets = { cTrackBase }
       local TrackBaseParts = {}
@@ -120,10 +143,12 @@ return function (path: { Types.Point }, pathFolder: Folder): ()
       if curPoint.Direction ~= nil then
         startCF = CFrame.lookAt(curPoint.Position, curPoint.Position + curPoint.Direction, Vector3.new(0, 1, 0))
       end
+      createCheckpoint(startCF)
       cTrackBase:PivotTo(startCF)
       local endCF = CFrame.lookAt(catmullRom(prv, a, b, nxt, 1), catmullRom(prv, a, b, nxt, 1.002))
       if nextPoint.Direction ~= nil then
         endCF = CFrame.lookAt(nextPoint.Position, nextPoint.Position - nextPoint.Direction, Vector3.new(0, 1, 0))
+        createCheckpoint(endCF)
       end
   
       local localBoundingBoxOffset: Vector3, localBoundingBoxSize: Vector3 = computeTwoBoundingBoxes(startCF, TrackBaseParts)
@@ -255,6 +280,7 @@ return function (path: { Types.Point }, pathFolder: Folder): ()
           local revPos = probedPoints[math.clamp(rct - 5, 1, #probedPoints)]
 
           local cf = CFrame.lookAt(revPos, reverseRunningPositionNow.Position)
+          if rct == t1 then cf = endCF end
           local rotation = reverseRunningPositionNow.Rotation:ToObjectSpace(cf.Rotation):Orthonormalize()
           bendPlacement(reversePlacement, -axis, rotation, -1, 0, 1)
 

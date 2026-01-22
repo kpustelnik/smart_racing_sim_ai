@@ -54,7 +54,7 @@ local function enableJointsAndJoinToWorld(item: PoolItem): ()
 		joint.Enabled = true
 	end
 
-	if DraggerService.JointsEnabled then
+	if DraggerService ~= nil and DraggerService.JointsEnabled then
 		local parts: { BasePart } = {}
 		for _, instance in item.instances do
 			for _, part: BasePart in (instance:QueryDescendants("BasePart") :: any) :: {BasePart} do

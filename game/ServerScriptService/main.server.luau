@@ -3,7 +3,7 @@ local modelId: string = 'telsa_nospecialf'
 local carModel: string = 'Telsa'
 local wsUrl: string = `ws://localhost:8000/ws/{modelId}`
 
-local mapGeneration = require(script.Parent:WaitForChild('mapGeneration'))
+local TrackGeneration = require(script.Parent:WaitForChild('TrackGeneration'))
 
 local CarsAIController = require(script.Parent:WaitForChild("CarsAIController"))
 
