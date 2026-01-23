@@ -36,6 +36,16 @@ class TrainingBridge:
     
     # --- Command Methods (send to Roblox) ---
     
+    def freeze(self, status: bool) -> None:
+        """
+        Request Roblox to spawn agents for a virtual environment.
+        
+        Args:
+            env_id: Unique identifier for the virtual environment
+            agents: List of agent IDs to spawn (e.g., ["car_0_env_xxx", "car_1_env_xxx"])
+        """
+        self._bridge.send_command("FREEZE", "", {"status": status})
+    
     def spawn_agents(self, env_id: str, agents: list[str]) -> None:
         """
         Request Roblox to spawn agents for a virtual environment.

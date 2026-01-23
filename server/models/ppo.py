@@ -33,15 +33,18 @@ from .base import ModelTrainer, TrainingBridge
 class RobloxFreezeCallback(BaseCallback):
     """Callback to log rollout start/end events."""
     
-    def __init__(self, verbose=0):
+    def __init__(self, bridge: TrainingBridge, verbose=0):
         super().__init__(verbose)
+        self.bridge = bridge
         print("[Callback] Initializing RobloxFreezeCallback.")
 
     def _on_rollout_end(self) -> None:
         print("Rollout end (Freeze)")
+        self.bridge.freeze(True)
 
     def _on_rollout_start(self) -> None:
         print("Rollout start (Unfreeze)")
+        self.bridge.freeze(False)
         
     def _on_step(self) -> bool:
         return True
@@ -123,7 +126,6 @@ class PettingZooWSEnv(ParallelEnv):
         terminations = {}
         truncations = {}
         infos = {}
-        print(self.state_dim)
 
         for agent in self.agents:
             agent_data = data_map.get(agent)
@@ -133,10 +135,6 @@ class PettingZooWSEnv(ParallelEnv):
                 rewards[agent] = float(agent_data.get('reward', 0.0))
                 terminations[agent] = bool(agent_data.get('terminated', False))
                 truncations[agent] = bool(agent_data.get('truncated', False))
-
-                infos[agent] = {
-                    "terminal_observation": np.array(agent_data.get('terminal_obs', np.zeros(self.state_dim)), dtype=np.float32)
-                }
             else:
                 observations[agent] = np.zeros(self.state_dim, dtype=np.float32)
                 rewards[agent] = 0.0
@@ -236,18 +234,19 @@ class PPOTrainer(ModelTrainer):
             save_vecnormalize=True,
             name_prefix=self.model_id,
         )
-        freeze_callback = RobloxFreezeCallback()
+        freeze_callback = RobloxFreezeCallback(self.bridge)
 
         try:
-            model.learn(
-                total_timesteps=self.HYPERPARAMETERS["total_timesteps"],
-                callback=[checkpoint_callback, freeze_callback],
-                reset_num_timesteps=False,
-            )
-            
-            model.save(os.path.join(self.MODELS_DIR, self.model_id))
-            env.save(stats_path)
-            print(f"[{self.model_id}] Saved PPO model and normalization stats.")
+            while True:
+                model.learn(
+                    total_timesteps=self.HYPERPARAMETERS["total_timesteps"],
+                    callback=[checkpoint_callback, freeze_callback],
+                    reset_num_timesteps=False,
+                )
+                
+                model.save(os.path.join(self.MODELS_DIR, self.model_id))
+                env.save(stats_path)
+                print(f"[{self.model_id}] Saved PPO model and normalization stats.")
             
         except Exception as e:
             print(f"[{self.model_id}] Training Error: {e}")

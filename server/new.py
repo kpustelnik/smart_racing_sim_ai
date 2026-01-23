@@ -14,6 +14,7 @@ Arguments:
     --port, -p          Server port (default: 8000)
     --host              Server host (default: 0.0.0.0)
 """
+# TODO
 
 import argparse
 import asyncio
@@ -30,7 +31,7 @@ import threading
 # --- CONFIGURATION ---
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 8000
-NUM_AGENTS = 5
+NUM_AGENTS = 3
 
 
 # --- DATA BRIDGE (internal implementation) ---
@@ -64,7 +65,10 @@ class DataBridge:
         except queue.Empty:
             pass
         if latest_data is None:
-            latest_data = c_queue.get(timeout=10)
+            try:
+                latest_data = c_queue.get(timeout=10)
+            except:
+                pass
         return latest_data
 
     def send_command(self, command: str, env_id: str, data: Optional[dict] = None):
