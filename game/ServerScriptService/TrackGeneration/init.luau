@@ -145,6 +145,7 @@ pathFolder.Name = 'Path'
 pathFolder.Parent = Workspace
 local genPath = function (path)
   pathFolder:ClearAllChildren()
+  --[[
   for i, curPoint: Point in ipairs(path) do
     local nextPoint: Point? = if i ~= #path then path[i + 1] else nil
     if curPoint.Next == nextPoint then continue end
@@ -159,6 +160,7 @@ local genPath = function (path)
       PathPart.CanCollide = false
     end
   end
+  ]]
 end
 
 queue:put({ Start }, 0) -- Add the starting point to the queue
@@ -272,5 +274,7 @@ genPath(finalPath)
 
 local Finalizer = require(script:WaitForChild("Finalizers"):WaitForChild("Main"))
 Finalizer(finalPath, pathFolder)
+
+PointsFolder:Destroy()
 
 return {}

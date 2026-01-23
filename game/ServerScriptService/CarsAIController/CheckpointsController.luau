@@ -35,15 +35,6 @@ CheckpointsController.GetTrackSize = function (): number
   return CheckpointsController.GetSizeTo(math.huge)
 end
 
-local Part = Instance.new("Part")
-Part.BrickColor = BrickColor.new("Dark green")
-Part.Anchored = true
-Part.Size = Vector3.new(2,2,2)
-Part.CanCollide = false
-Part.CanTouch = false
-Part.CanQuery = false
-Part.Parent = game.Workspace
-
 CheckpointsController.GetTrackDistanceState = function (Position: Vector3, Orientation: Vector3?): (number, number, number?)
   if #CheckpointsController.Checkpoints == 0 then return 0, 0 end
 
@@ -61,7 +52,6 @@ CheckpointsController.GetTrackDistanceState = function (Position: Vector3, Orien
       minDistanceToRay = Distance
       minDistanceCheckpoint = i - 1
       minDistanceProgressDistance = (Prev.Position - CP).Magnitude
-      Part.CFrame = CFrame.new(CP)
 
       if Orientation ~= nil then
         local TrackDirection: Vector3 = (Next.Position - Prev.Position).Unit * Vector3.new(1, 0, 1)

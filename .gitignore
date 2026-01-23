@@ -21,3 +21,5 @@ server/saved_models
 
 # TODO: Fully implement
 todo
+
+*.pyc

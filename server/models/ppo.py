@@ -14,7 +14,7 @@ Hyperparameters:
 
 import os
 import numpy as np
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import gymnasium as gym
 from gymnasium import spaces
@@ -164,7 +164,7 @@ class PPOTrainer(ModelTrainer):
         "device": "cpu",
     }
     
-    def create_model(self, env: Any, tensorboard_log: str = None) -> PPO:
+    def create_model(self, env: Any, tensorboard_log: Optional[str] = None) -> PPO:
         """Create a new PPO model with configured hyperparameters."""
         hp = self.HYPERPARAMETERS
         policy_kwargs = dict(net_arch=hp["net_arch"])

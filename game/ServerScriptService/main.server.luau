@@ -5,7 +5,7 @@ local wsUrl: string = `ws://localhost:8000/ws/{modelId}`
 
 local TrackGeneration = require(script.Parent:WaitForChild('TrackGeneration'))
 
-local CarsAIController = require(script.Parent:WaitForChild("CarsAIController"))
+local CarsAIController = require(script.Parent:WaitForChild("CarsAIControllerOLD"))
 
 local createWS = function (...): (boolean, any) return pcall(CarsAIController, ...) end
 -- Spawn the base model
