@@ -5,11 +5,12 @@ A modular WebSocket server for training RL agents in a Roblox racing environment
 
 Usage:
     python new.py --model-type ppo
-    python new.py --model-type sac
+    python new.py --model-type sac --mode use
     python new.py --list-models
 
 Arguments:
     --model-type, -m    Model type to use (ppo, sac, etc.)
+    --mode              Mode: 'train' (default) or 'use' (inference only)
     --list-models       List all available model types
     --port, -p          Server port (default: 8000)
     --host              Server host (default: 0.0.0.0)
@@ -97,13 +98,22 @@ def train_model(model_type: str, model_id: str, bridge: DataBridge):
     trainer.train()
 
 
+def use_model(model_type: str, model_id: str, bridge: DataBridge):
+    """Use trained model for inference only (no training)."""
+    trainer_class = get_trainer(model_type)
+    training_bridge = TrainingBridge(bridge)
+    trainer = trainer_class(training_bridge, model_id)
+    trainer.use()
+
+
 # --- FASTAPI APP FACTORY ---
-def create_app(model_type: str) -> FastAPI:
-    """Create FastAPI app configured for the specified model type."""
+def create_app(model_type: str, mode: str = "train") -> FastAPI:
+    """Create FastAPI app configured for the specified model type and mode."""
     
+    mode_desc = "Training" if mode == "train" else "Inference"
     app = FastAPI(
-        title="3D Racing AI Training Server",
-        description=f"Training server using {model_type.upper()} model",
+        title=f"3D Racing AI {mode_desc} Server",
+        description=f"{mode_desc} server using {model_type.upper()} model",
     )
 
     @app.websocket("/ws/{model_id}")
@@ -112,9 +122,10 @@ def create_app(model_type: str) -> FastAPI:
 
         bridge = DataBridge(num_agents=NUM_AGENTS)
         
-        thread_name = f"train_{model_id}"
+        target_func = train_model if mode == "train" else use_model
+        thread_name = f"{mode}_{model_id}"
         thread = threading.Thread(
-            target=train_model,
+            target=target_func,
             args=(model_type, model_id, bridge),
             name=thread_name,
             daemon=True,
@@ -150,6 +161,7 @@ def create_app(model_type: str) -> FastAPI:
         return {
             "status": "running",
             "model_type": model_type,
+            "mode": mode,
             "available_models": list_available_models(),
         }
 
@@ -165,6 +177,7 @@ def parse_args():
 Examples:
     python new.py --model-type ppo
     python new.py -m sac --port 8080
+    python new.py --mode use -m ppo       # Inference only (no training)
     python new.py --list-models
         """,
     )
@@ -174,6 +187,14 @@ Examples:
         type=str,
         default="ppo",
         help="Model type to use for training (default: ppo)",
+    )
+    
+    parser.add_argument(
+        "--mode",
+        type=str,
+        choices=["train", "use"],
+        default="train",
+        help="Mode: 'train' for training, 'use' for inference only (default: train)",
     )
     
     parser.add_argument(
@@ -216,10 +237,11 @@ def main():
         print(f"Error: {e}")
         return
     
-    print(f"Starting server with model type: {args.model_type}")
+    mode_str = "TRAINING" if args.mode == "train" else "INFERENCE (use)"
+    print(f"Starting server in {mode_str} mode with model type: {args.model_type}")
     print(f"Listening on {args.host}:{args.port}")
     
-    app = create_app(args.model_type)
+    app = create_app(args.model_type, mode=args.mode)
     uvicorn.run(app, host=args.host, port=args.port)
 
 
