@@ -2,7 +2,7 @@
 	<Meta name="ExplicitAutoJoints">true</Meta>
 	<External>null</External>
 	<External>nil</External>
-	<Item class="Model" referent="RBX7D344F83B2AE430E9149D19C167BF8E6">
+	<Item class="Model" referent="RBXEFCE8AAC07C74E729ECB48BA312CCDC3">
 		<Properties>
 			<token name="LevelOfDetail">0</token>
 			<CoordinateFrame name="ModelMeshCFrame">
@@ -53,7 +53,7 @@
 			<int64 name="SourceAssetId">-1</int64>
 			<BinaryString name="Tags"></BinaryString>
 		</Properties>
-		<Item class="Part" referent="RBX7F8791F5C2574268BD8FC94654B39382">
+		<Item class="Part" referent="RBX0643BC110CAF4CACBBAEAB836ACCBA21">
 			<Properties>
 				<token name="shape">1</token>
 				<token name="formFactorRaw">1</token>
@@ -152,7 +152,7 @@
 				<BinaryString name="Tags">V0FMTA==</BinaryString>
 			</Properties>
 		</Item>
-		<Item class="Part" referent="RBX69F1923A3D3B448CBA8CFCC51AFC2477">
+		<Item class="Part" referent="RBX0267B95B34C049C9BFC35FDB741D216E">
 			<Properties>
 				<token name="shape">1</token>
 				<token name="formFactorRaw">1</token>
@@ -248,10 +248,10 @@
 				<bool name="DefinesCapabilities">false</bool>
 				<string name="Name">B</string>
 				<int64 name="SourceAssetId">-1</int64>
-				<BinaryString name="Tags"></BinaryString>
+				<BinaryString name="Tags">Uk9BRA==</BinaryString>
 			</Properties>
 		</Item>
-		<Item class="Part" referent="RBX5D724578E76241C79DC6CCEB00EE6EB9">
+		<Item class="Part" referent="RBXE819D9E09DC340569794B279A9CBF902">
 			<Properties>
 				<token name="shape">1</token>
 				<token name="formFactorRaw">1</token>
@@ -350,7 +350,7 @@
 				<BinaryString name="Tags">V0FMTA==</BinaryString>
 			</Properties>
 		</Item>
-		<Item class="Part" referent="RBXFF74841432784AE0B3C62B2F0AE42A55">
+		<Item class="Part" referent="RBXDE627B30747A4198B94407F0E7A11C86">
 			<Properties>
 				<token name="shape">1</token>
 				<token name="formFactorRaw">1</token>
@@ -446,10 +446,10 @@
 				<bool name="DefinesCapabilities">false</bool>
 				<string name="Name">D</string>
 				<int64 name="SourceAssetId">-1</int64>
-				<BinaryString name="Tags"></BinaryString>
+				<BinaryString name="Tags">Uk9BRA==</BinaryString>
 			</Properties>
 		</Item>
-		<Item class="Part" referent="RBXFA63A8FFC846480788A5BB6EA1A02FAD">
+		<Item class="Part" referent="RBXD41CB62B678E445F940A8DEDCD7C0BDD">
 			<Properties>
 				<token name="shape">1</token>
 				<token name="formFactorRaw">1</token>
@@ -545,10 +545,10 @@
 				<bool name="DefinesCapabilities">false</bool>
 				<string name="Name">E</string>
 				<int64 name="SourceAssetId">-1</int64>
-				<BinaryString name="Tags"></BinaryString>
+				<BinaryString name="Tags">Uk9BRA==</BinaryString>
 			</Properties>
 		</Item>
-		<Item class="Part" referent="RBXD63B0A4869324E6BB2D67D6A6513A10A">
+		<Item class="Part" referent="RBX8E73FD80E00C42FBA35E6EB02D060AFB">
 			<Properties>
 				<token name="shape">1</token>
 				<token name="formFactorRaw">1</token>
@@ -644,7 +644,7 @@
 				<bool name="DefinesCapabilities">false</bool>
 				<string name="Name">F</string>
 				<int64 name="SourceAssetId">-1</int64>
-				<BinaryString name="Tags"></BinaryString>
+				<BinaryString name="Tags">Uk9BRA==</BinaryString>
 			</Properties>
 		</Item>
 	</Item>
