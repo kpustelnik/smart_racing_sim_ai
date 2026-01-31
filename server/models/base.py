@@ -179,6 +179,18 @@ class ModelTrainer(ABC):
         """
         pass
     
+    @abstractmethod
+    def use(self) -> None:
+        """
+        Run inference loop (no training).
+        
+        This should:
+        1. Create the environment
+        2. Load the existing model
+        3. Run inference loop using model.predict()
+        """
+        pass
+    
     @classmethod
     def get_description(cls) -> str:
         """Return a human-readable description of this trainer."""
