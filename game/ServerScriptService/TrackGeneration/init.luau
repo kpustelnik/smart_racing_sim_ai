@@ -270,10 +270,14 @@ while not queue:empty() do
 end
 
 print("Finished")
-genPath(finalPath)
+if finalPath ~= nil then
+  genPath(finalPath)
 
-local Finalizer = require(script:WaitForChild("Finalizers"):WaitForChild("Main"))
-Finalizer(finalPath, pathFolder)
+  local Finalizer = require(script:WaitForChild("Finalizers"):WaitForChild("Main"))
+  Finalizer(finalPath, pathFolder)
+else
+  warn("Failed to generate path")
+end
 
 PointsFolder:Destroy()
 

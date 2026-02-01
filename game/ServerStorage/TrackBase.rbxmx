@@ -2,21 +2,21 @@
 	<Meta name="ExplicitAutoJoints">true</Meta>
 	<External>null</External>
 	<External>nil</External>
-	<Item class="Model" referent="RBXEFCE8AAC07C74E729ECB48BA312CCDC3">
+	<Item class="Model" referent="RBXB7EC04EC935243A4850145E622BCB298">
 		<Properties>
 			<token name="LevelOfDetail">0</token>
 			<CoordinateFrame name="ModelMeshCFrame">
-				<X>146.085754</X>
-				<Y>4.71391869</Y>
-				<Z>656.435364</Z>
-				<R00>-0.96648252</R00>
-				<R01>-0.00195313478</R01>
-				<R02>-0.258816481</R02>
-				<R10>0.00266625499</R10>
-				<R11>1.00026846</R11>
-				<R12>-0.0174905229</R12>
+				<X>174.944244</X>
+				<Y>6.66163778</Y>
+				<Z>764.11908</Z>
+				<R00>-0.966480136</R00>
+				<R01>-0.00195315341</R01>
+				<R02>-0.258815289</R02>
+				<R10>0.00266624568</R10>
+				<R11>1.00027323</R11>
+				<R12>-0.0174904484</R12>
 				<R20>0.259064853</R20>
-				<R21>-0.017580796</R21>
+				<R21>-0.017580945</R21>
 				<R22>-0.966138363</R22>
 			</CoordinateFrame>
 			<SharedString name="ModelMeshData">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
@@ -32,9 +32,9 @@
 			<SharedString name="SlimHash">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
 			<OptionalCoordinateFrame name="WorldPivotData">
 				<CFrame>
-					<X>-467.753632</X>
-					<Y>177.393173</Y>
-					<Z>30.3365021</Z>
+					<X>-458.372101</X>
+					<Y>178.904251</Y>
+					<Z>67.4566116</Z>
 					<R00>-0.965923369</R00>
 					<R01>-0.00195281161</R01>
 					<R02>-0.258820772</R02>
@@ -53,7 +53,7 @@
 			<int64 name="SourceAssetId">-1</int64>
 			<BinaryString name="Tags"></BinaryString>
 		</Properties>
-		<Item class="Part" referent="RBX0643BC110CAF4CACBBAEAB836ACCBA21">
+		<Item class="Part" referent="RBXEB14797235FC470DAFE9539BCFCF2755">
 			<Properties>
 				<token name="shape">1</token>
 				<token name="formFactorRaw">1</token>
@@ -68,17 +68,17 @@
 				<token name="BottomSurface">0</token>
 				<token name="BottomSurfaceInput">0</token>
 				<CoordinateFrame name="CFrame">
-					<X>-491.178467</X>
-					<Y>181.984573</Y>
-					<Z>36.5541801</Z>
+					<X>-481.806702</X>
+					<Y>188.494843</Y>
+					<Z>73.5864182</Z>
 					<R00>-0.965923369</R00>
-					<R01>-0.00195281347</R01>
-					<R02>-0.258820862</R02>
-					<R10>0.00266291201</R10>
-					<R11>0.999843836</R11>
-					<R12>-0.0174818896</R12>
-					<R20>0.258814484</R20>
-					<R21>-0.0175753869</R21>
+					<R01>-0.00195281394</R01>
+					<R02>-0.258820891</R02>
+					<R10>0.00266291131</R10>
+					<R11>0.999843955</R11>
+					<R12>-0.0174818859</R12>
+					<R20>0.258814454</R20>
+					<R21>-0.0175753925</R21>
 					<R22>-0.965767264</R22>
 				</CoordinateFrame>
 				<bool name="CanCollide">true</bool>
@@ -141,7 +141,7 @@
 				</Vector3>
 				<Vector3 name="size">
 					<X>0.499998599</X>
-					<Y>9</Y>
+					<Y>19</Y>
 					<Z>1.99940097</Z>
 				</Vector3>
 				<BinaryString name="AttributesSerialize"></BinaryString>
@@ -152,7 +152,7 @@
 				<BinaryString name="Tags">V0FMTA==</BinaryString>
 			</Properties>
 		</Item>
-		<Item class="Part" referent="RBX0267B95B34C049C9BFC35FDB741D216E">
+		<Item class="Part" referent="RBXF13D8F3558DF45A686C7F681E0E2C492">
 			<Properties>
 				<token name="shape">1</token>
 				<token name="formFactorRaw">1</token>
@@ -167,18 +167,18 @@
 				<token name="BottomSurface">0</token>
 				<token name="BottomSurfaceInput">0</token>
 				<CoordinateFrame name="CFrame">
-					<X>-467.757782</X>
-					<Y>176.919891</Y>
-					<Z>30.3174763</Z>
+					<X>-458.376221</X>
+					<Y>178.430939</Y>
+					<Z>67.4375916</Z>
 					<R00>-0.965927005</R00>
-					<R01>-0.00195281848</R01>
+					<R01>-0.00195281941</R01>
 					<R02>-0.258820772</R02>
-					<R10>0.00266292342</R10>
-					<R11>0.999843419</R11>
-					<R12>-0.017481897</R12>
+					<R10>0.00266292319</R10>
+					<R11>0.999843538</R11>
+					<R12>-0.0174818914</R12>
 					<R20>0.258815557</R20>
-					<R21>-0.0175753739</R21>
-					<R22>-0.965768099</R22>
+					<R21>-0.0175753795</R21>
+					<R22>-0.965768039</R22>
 				</CoordinateFrame>
 				<bool name="CanCollide">true</bool>
 				<bool name="CanQuery">true</bool>
@@ -251,7 +251,7 @@
 				<BinaryString name="Tags">Uk9BRA==</BinaryString>
 			</Properties>
 		</Item>
-		<Item class="Part" referent="RBXE819D9E09DC340569794B279A9CBF902">
+		<Item class="Part" referent="RBXE6EFD7FA98C64F8D942AB9BAE53D3874">
 			<Properties>
 				<token name="shape">1</token>
 				<token name="formFactorRaw">1</token>
@@ -266,17 +266,17 @@
 				<token name="BottomSurface">0</token>
 				<token name="BottomSurfaceInput">0</token>
 				<CoordinateFrame name="CFrame">
-					<X>-444.34024</X>
-					<Y>181.854813</Y>
-					<Z>23.9673042</Z>
+					<X>-434.968475</X>
+					<Y>188.365082</Y>
+					<Z>60.9995537</Z>
 					<R00>-0.965923369</R00>
-					<R01>-0.00195281347</R01>
-					<R02>-0.258820862</R02>
-					<R10>0.00266291201</R10>
-					<R11>0.999843836</R11>
-					<R12>-0.0174818896</R12>
-					<R20>0.258814484</R20>
-					<R21>-0.0175753869</R21>
+					<R01>-0.00195281394</R01>
+					<R02>-0.258820891</R02>
+					<R10>0.00266291131</R10>
+					<R11>0.999843955</R11>
+					<R12>-0.0174818859</R12>
+					<R20>0.258814454</R20>
+					<R21>-0.0175753925</R21>
 					<R22>-0.965767264</R22>
 				</CoordinateFrame>
 				<bool name="CanCollide">true</bool>
@@ -339,7 +339,7 @@
 				</Vector3>
 				<Vector3 name="size">
 					<X>0.499999434</X>
-					<Y>9</Y>
+					<Y>19</Y>
 					<Z>1.92824638</Z>
 				</Vector3>
 				<BinaryString name="AttributesSerialize"></BinaryString>
@@ -350,7 +350,7 @@
 				<BinaryString name="Tags">V0FMTA==</BinaryString>
 			</Properties>
 		</Item>
-		<Item class="Part" referent="RBXDE627B30747A4198B94407F0E7A11C86">
+		<Item class="Part" referent="RBXC70A9723B1E74CCDBC476DA7EB2A1DB6">
 			<Properties>
 				<token name="shape">1</token>
 				<token name="formFactorRaw">1</token>
@@ -365,17 +365,17 @@
 				<token name="BottomSurface">0</token>
 				<token name="BottomSurfaceInput">0</token>
 				<CoordinateFrame name="CFrame">
-					<X>-467.754852</X>
-					<Y>177.251099</Y>
-					<Z>30.3256016</Z>
+					<X>-458.373322</X>
+					<Y>178.762146</Y>
+					<Z>67.4457169</Z>
 					<R00>-0.965923369</R00>
-					<R01>-0.00195281347</R01>
-					<R02>-0.258820862</R02>
-					<R10>0.00266291201</R10>
-					<R11>0.999843836</R11>
-					<R12>-0.0174818933</R12>
-					<R20>0.258814484</R20>
-					<R21>-0.0175753869</R21>
+					<R01>-0.00195281394</R01>
+					<R02>-0.258820891</R02>
+					<R10>0.00266291131</R10>
+					<R11>0.999843955</R11>
+					<R12>-0.0174818896</R12>
+					<R20>0.258814454</R20>
+					<R21>-0.0175753925</R21>
 					<R22>-0.965767264</R22>
 				</CoordinateFrame>
 				<bool name="CanCollide">true</bool>
@@ -449,7 +449,7 @@
 				<BinaryString name="Tags">Uk9BRA==</BinaryString>
 			</Properties>
 		</Item>
-		<Item class="Part" referent="RBXD41CB62B678E445F940A8DEDCD7C0BDD">
+		<Item class="Part" referent="RBX9BAC8F06377742078F6C300FBCB2E949">
 			<Properties>
 				<token name="shape">1</token>
 				<token name="formFactorRaw">1</token>
@@ -464,17 +464,17 @@
 				<token name="BottomSurface">0</token>
 				<token name="BottomSurfaceInput">0</token>
 				<CoordinateFrame name="CFrame">
-					<X>-474.516357</X>
-					<Y>177.269699</Y>
-					<Z>32.1373291</Z>
+					<X>-465.134857</X>
+					<Y>178.780731</Y>
+					<Z>69.2574539</Z>
 					<R00>-0.965923369</R00>
-					<R01>-0.00195281347</R01>
-					<R02>-0.258820862</R02>
-					<R10>0.00266291201</R10>
-					<R11>0.999843836</R11>
-					<R12>-0.0174818933</R12>
-					<R20>0.258814484</R20>
-					<R21>-0.0175753869</R21>
+					<R01>-0.00195281394</R01>
+					<R02>-0.258820891</R02>
+					<R10>0.00266291131</R10>
+					<R11>0.999843955</R11>
+					<R12>-0.0174818896</R12>
+					<R20>0.258814454</R20>
+					<R21>-0.0175753925</R21>
 					<R22>-0.965767264</R22>
 				</CoordinateFrame>
 				<bool name="CanCollide">true</bool>
@@ -548,7 +548,7 @@
 				<BinaryString name="Tags">Uk9BRA==</BinaryString>
 			</Properties>
 		</Item>
-		<Item class="Part" referent="RBX8E73FD80E00C42FBA35E6EB02D060AFB">
+		<Item class="Part" referent="RBX21D2E0B3BDA547B799A8AAE5402A935E">
 			<Properties>
 				<token name="shape">1</token>
 				<token name="formFactorRaw">1</token>
@@ -563,17 +563,17 @@
 				<token name="BottomSurface">0</token>
 				<token name="BottomSurfaceInput">0</token>
 				<CoordinateFrame name="CFrame">
-					<X>-460.993317</X>
-					<Y>177.232437</Y>
-					<Z>28.5139561</Z>
+					<X>-451.611816</X>
+					<Y>178.743469</Y>
+					<Z>65.6340866</Z>
 					<R00>-0.965923369</R00>
-					<R01>-0.00195281347</R01>
-					<R02>-0.258820862</R02>
-					<R10>0.00266291201</R10>
-					<R11>0.999843836</R11>
-					<R12>-0.0174818933</R12>
-					<R20>0.258814484</R20>
-					<R21>-0.0175753869</R21>
+					<R01>-0.00195281394</R01>
+					<R02>-0.258820891</R02>
+					<R10>0.00266291131</R10>
+					<R11>0.999843955</R11>
+					<R12>-0.0174818896</R12>
+					<R20>0.258814454</R20>
+					<R21>-0.0175753925</R21>
 					<R22>-0.965767264</R22>
 				</CoordinateFrame>
 				<bool name="CanCollide">true</bool>

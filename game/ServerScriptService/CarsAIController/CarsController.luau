@@ -102,9 +102,12 @@ type RayConfig = {
   Source: Part,
   Direction: Vector3,
   IncludeNormal: boolean,
-  IgnoreCars: boolean
+  IgnoreCars: boolean,
+  IgnoreXZRotation: boolean
 }
 
+local EnableDebugParts: boolean = true
+local RaycastOffset = Vector3.new(0, 5, 0)
 CarsController.GetRaycasts = function (car: Model): { number }?
   local Config: any = CarsController.LoadConfig(car)
   if Config == nil then return end
@@ -112,9 +115,12 @@ CarsController.GetRaycasts = function (car: Model): { number }?
   local ConfigRays: { RayConfig } = Config.Rays
   local Result: { number } = {}
   for _, rc: RayConfig in ipairs(ConfigRays) do
-    local originCFrame: CFrame = CFrame.new(rc.Source.Position)
-    local _, Y: number, _ = rc.Source.CFrame:ToEulerAnglesYXZ()
-    originCFrame *= CFrame.Angles(0, Y, 0) -- Only preserve the Y rotation
+    local originCFrame: CFrame = rc.Source.CFrame
+    if rc.IgnoreXZRotation then
+      originCFrame = CFrame.new(rc.Source.Position)
+      local _, Y: number, _ = rc.Source.CFrame:ToEulerAnglesYXZ()
+      originCFrame *= CFrame.Angles(0, Y, 0) -- Only preserve the Y rotation
+    end
 
     local targetPos: Vector3 = (originCFrame * CFrame.new(rc.Direction)).Position
     local startPos: Vector3 = originCFrame.Position
@@ -137,23 +143,23 @@ CarsController.GetRaycasts = function (car: Model): { number }?
       params.FilterDescendantsInstances = SameEnvCars
     end
 
-    local raycastResult: RaycastResult<BasePart>? = Workspace:Raycast(startPos, targetPos - startPos, params)
+    local raycastResult: RaycastResult<BasePart>? = Workspace:Raycast(startPos + RaycastOffset, targetPos - startPos, params)
 
     local hitPosition: Vector3 = if raycastResult ~= nil then raycastResult.Position else targetPos
     
-    --[[ Debug parts
-    local part: Part = Instance.new("Part")
-    part.CanCollide = false
-    part.Anchored = true
-    part.CanTouch = false
-    part.CanQuery = false
-    part.BrickColor = BrickColor.new("Really red")
-    part.Size = Vector3.new(1, 1, (hitPosition - startPos).Magnitude)
-    part.Parent = car
-    part.CFrame = CFrame.lookAt((hitPosition + startPos) / 2, hitPosition)
-    part.Transparency = 0.5
-    task.defer(function(): () task.wait(); part:Destroy() end)
-    ]]
+    if EnableDebugParts then -- Debug parts
+      local part: Part = Instance.new("Part")
+      part.CanCollide = false
+      part.Anchored = true
+      part.CanTouch = false
+      part.CanQuery = false
+      part.BrickColor = BrickColor.new("Really red")
+      part.Size = Vector3.new(1, 1, (hitPosition - startPos).Magnitude)
+      part.Parent = car
+      part.CFrame = CFrame.lookAt((hitPosition + startPos) / 2, hitPosition)
+      part.Transparency = 0.5
+      task.defer(function(): () task.wait(); part:Destroy() end)
+    end
 
     local Distance: number = (hitPosition - startPos).Magnitude
     table.insert(Result, Distance / rc.Direction.Magnitude)

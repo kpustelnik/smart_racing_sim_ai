@@ -2,6 +2,7 @@
 local modelId: string = 'telsa_nospecialf'
 local carModel: string = 'Telsa'
 local wsUrl: string = `ws://localhost:8000/ws/{modelId}`
+local enableCollisions: boolean = false
 
 local TrackGeneration = require(script.Parent:WaitForChild('TrackGeneration'))
 
@@ -11,7 +12,7 @@ local createWS = function (...): (boolean, any) return pcall(CarsAIController, .
 -- Spawn the base model
 task.spawn(function(): ()
   while true do
-    local success: boolean = createWS(wsUrl, modelId, carModel)
+    local success: boolean = createWS(wsUrl, modelId, carModel, enableCollisions)
     if success then
       print("Successfully ran websocket.")
     end
