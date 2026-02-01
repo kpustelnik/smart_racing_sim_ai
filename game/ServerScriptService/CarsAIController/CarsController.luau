@@ -2,9 +2,13 @@ local Workspace = game:GetService('Workspace')
 local CollectionService = game:GetService('CollectionService')
 local CarsFolder: Instance = Workspace:WaitForChild('Cars')
 
+local CheckpointsController = require(script.Parent:WaitForChild('CheckpointsController'))
+
 local ServerStorage = game:GetService('ServerStorage')
 local CarModels: Instance = ServerStorage:WaitForChild('CarModels')
-local CarScripts: Folder = script.Parent.Parent:WaitForChild('Car'):WaitForChild('CarScripts')
+local AllCarScripts = script.Parent.Parent:WaitForChild('Car')
+local CarScripts: Folder = AllCarScripts:WaitForChild('CarScripts')
+local Recolor = require(AllCarScripts:WaitForChild('Recolor'))
 
 local CarsController = {}
 
@@ -56,7 +60,7 @@ CarsController.PickSpawns = function (count: number, ignoreWithParts: { Instance
   return PickedSpawns
 end
 
-CarsController.SpawnCars = function (carTypes: { string }, presetCarSpawns: { BasePart }?): { Model }
+CarsController.SpawnCars = function (carTypes: { string }, presetCarSpawns: { BasePart }?, collisionGroup: string?): { Model }
   local carSpawns: { BasePart } = if presetCarSpawns ~= nil then presetCarSpawns else CarsController.PickSpawns(#carTypes)
 
   local spawnedCars: { Model } = {}
@@ -69,6 +73,12 @@ CarsController.SpawnCars = function (carTypes: { string }, presetCarSpawns: { Ba
     local carModelSpawned: Model = carModel:Clone()
     carModelSpawned.Parent = CarsFolder
     carModelSpawned:PivotTo(carSpawn.CFrame)
+
+    if collisionGroup ~= nil then
+      for _, v: Instance in pairs(carModelSpawned:GetDescendants()) do
+        if v:IsA('BasePart') then v.CollisionGroup = collisionGroup end
+      end
+    end
 
     local Scripts: Folder = CarScripts:Clone()
     Scripts.Name = 'Scripts'
@@ -153,5 +163,186 @@ CarsController.GetRaycasts = function (car: Model): { number }?
 
   return Result
 end
+
+local EnvCGPrefix: string = 'CARS_'
+CarsController.GetEnvCollisionGroup = function (envId: string): string
+  return EnvCGPrefix .. envId
+end
+
+CarsController.IsEnvCollisionGroup = function (groupName: string): boolean
+  return string.sub(groupName, 1, #EnvCGPrefix) == EnvCGPrefix
+end
+
+export type CarData = {
+  Connections: { RBXScriptConnection },
+  
+  Model: Model?,
+  CarEngine: Instance,
+  CarInputs: Instance,
+  CarController: any,
+
+  IsStateUpdated: boolean,
+  LastBestProgress: number,
+  LastBestProgressTime: number,
+  LastReportedProgress: number,
+  CurrentLap: number,
+  LastCheckpoint: number,
+  LastObservation: CarObservation?,
+  LastUpdateTime: number?,
+
+  TruncationPending: boolean,
+  TerminationPending: boolean,
+
+  StartTime: number,
+  FreezeStart: number?
+}
+
+CarsController.CleanupCar = function (Id: string): ()
+  local carData: CarData? = CarsController.CurrentCars[Id]
+  if carData == nil then return end
+
+  while #carData.Connections > 0 do
+    local conn: RBXScriptConnection = table.remove(carData.Connections)
+    conn:Disconnect()
+  end
+  if carData.Model ~= nil then
+    pcall(function() carData.Model:Destroy() end)
+    carData.Model = nil
+  end
+  CarsController.CurrentCars[Id] = nil
+end
+
+CarsController.ApplyHighlightColor = function (model: Model, color: Color3?): ()
+  local highlight: Instance? = model:FindFirstChildWhichIsA('Highlight')
+  if color == nil then
+    if highlight ~= nil then
+      highlight:Destroy()
+    end
+    return
+  end
+
+  if highlight == nil then
+    highlight = Instance.new('Highlight')
+    highlight.Adornee = model
+    highlight.Parent = model
+    highlight.FillTransparency = 0.7
+    highlight.OutlineTransparency = 1
+  end
+
+  highlight.FillColor = color
+end
+
+CarsController.ApplyColor = function (model: Model, color: Color3): () return Recolor(model, color) end
+
+CarsController.SetupCarEvents = function (Id: string): ()
+  local carData: CarData? = CarsController.CurrentCars[Id]
+  if carData == nil then return end
+  local carModel: Model? = carData.Model
+  if carModel == nil then return end
+
+  local connections: { RBXScriptConnection } = carData.Connections
+
+  -- Cleanup the car on destroy
+  local destroyConn: RBXScriptConnection = carModel.Destroying:Connect(function (): ()
+    carData.Model = nil
+    carData.TerminationPending = true
+  end)
+  table.insert(connections, destroyConn)
+
+  -- Walls collision detection
+  local wallTouchedHandler = function (hit: BasePart): ()
+    if hit:IsDescendantOf(carModel) then carData.TerminationPending = true end
+  end
+  local Walls = CollectionService:GetTagged('WALL')
+  for _, Wall: Instance in ipairs(Walls) do
+    if not Wall:IsA('BasePart') then continue end
+
+    local wallTouchedConn: RBXScriptConnection = Wall.Touched:Connect(wallTouchedHandler)
+    table.insert(connections, wallTouchedConn)
+  end
+end
+
+export type CarObservation = { number }
+
+CarsController.RetrieveObservation = function (Id: string): (CarObservation?, CarObservation)
+  local carData: CarData? = CarsController.CurrentCars[Id]
+  if carData == nil then return end
+  local carModel: Model? = carData.Model
+  if carModel == nil then return end
+
+  local carCFrame: CFrame = carModel:GetPivot()
+  local carPosition = carCFrame.Position
+  local carOrientation = carCFrame.LookVector
+    
+  local _, _, trackOrientation: number? = CheckpointsController.GetTrackProgressState(carPosition, carOrientation)
+  local carEngine: Instance = carData.CarEngine
+
+  local lastObservation = carData.LastObservation
+
+  local obs: CarObservation = {}
+  local rc: {number}? = CarsController.GetRaycasts(carModel)
+  if rc == nil then error('Failed to get raycasts for car ' .. Id) end
+  for _, value: number in ipairs(rc) do table.insert(obs, value) end -- Copy over
+
+  local nitroStatus: number = carEngine:GetAttribute('_nitro') :: any
+  local velocityStatus: number = carEngine:GetAttribute('_speed') :: any
+  local maxVelocity: number = carEngine:GetAttribute('forwardMaxSpeed') :: any
+  table.insert(obs, nitroStatus) -- Nitro status
+  table.insert(obs, math.clamp(velocityStatus / maxVelocity, -1, 1)) -- Relative velocity
+  
+  local realOrientation: number = if trackOrientation ~= nil then trackOrientation / math.pi else 0
+  local isReverse: number = if realOrientation > 0.5 or realOrientation < -0.5 then 1 else 0
+  table.insert(obs, isReverse)
+  
+  carData.LastObservation = obs
+  return obs, lastObservation
+end
+
+CarsController.CurrentCars = {} :: { [string]: CarData? }
+CarsController.SetupCar = function (Id: string, EnvId: string, Model: string, Spawn: BasePart): CarData?
+  CarsController.CleanupCar(Id)
+
+  local CGName: string = CarsController.GetEnvCollisionGroup(EnvId)
+  local CarInstance: Model? = CarsController.SpawnCars({ Model }, Spawn, CGName)[1]
+  if CarInstance == nil then return nil end
+
+  CarInstance:SetAttribute('ENV', EnvId)
+
+  local carInputs = CarInstance:WaitForChild('Inputs')
+  local carEngine = CarInstance:WaitForChild('Engine')
+  local carController = require(CarInstance:WaitForChild("Scripts"):WaitForChild("Controller"))
+  local ct: number = tick()
+  local carData: CarData = {
+    Connections = {},
+
+    Model = CarInstance,
+    CarInputs = carInputs,
+    CarEngine = carEngine,
+    CarController = carController,
+    
+    IsStateUpdated = false,
+    LastBestProgress = 0,
+    LastBestProgressTime = ct,
+    LastReportedProgress = 0,
+    CurrentLap = 0,
+    LastCheckpoint = 1,
+    LastObservation = nil,
+    LastUpdateTime = nil,
+
+    TerminationPending = false,
+    TruncationPending = false,
+
+    StartTime = ct,
+    FreezeStart = nil
+  }
+
+  CarsController.CurrentCars[Id] = carData
+
+  CarsController.SetupCarEvents(Id)
+  CarsController.RetrieveObservation(Id)
+  return carData
+end
+
+CarsController.GetCarData = function (Id: string): CarData? return CarsController.CurrentCars[Id] end
 
 return CarsController
