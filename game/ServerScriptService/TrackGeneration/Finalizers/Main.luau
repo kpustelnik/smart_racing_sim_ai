@@ -2,6 +2,7 @@
 
 local Types = require(script.Parent.Parent:WaitForChild("types"))
 
+local AssetService = game:GetService('AssetService')
 local ServerStorage = game:GetService('ServerStorage')
 local ServerScriptService = game:GetService("ServerScriptService")
 
@@ -133,20 +134,11 @@ return function (path: { Types.Point }, pathFolder: Folder): ()
       local b = nextPoint.Position
       local nxt = if nextPoint.Direction ~= nil then nextPoint.Position - 400 * Vector3.new(nextPoint.Direction.X, 0, nextPoint.Direction.Z) elseif i + 2 <= #path then path[i+2].Position else nextPoint.Position
 
-      local cTrackBase = TrackBase:Clone()
-      local TrackBaseTargets = { cTrackBase }
-      local TrackBaseParts = {}
-      for _, part: Instance in ipairs(cTrackBase:GetDescendants()) do
-        if part:IsA("BasePart") then table.insert(TrackBaseParts, part) end
-      end
-
-      cTrackBase.Parent = pathFolder
       local startCF = CFrame.lookAt(catmullRom(prv, a, b, nxt, 0), catmullRom(prv, a, b, nxt, 0.002))
       if curPoint.Direction ~= nil then
         startCF = CFrame.lookAt(curPoint.Position, curPoint.Position + curPoint.Direction, Vector3.new(0, 1, 0))
       end
       createCheckpoint(startCF)
-      cTrackBase:PivotTo(startCF) -- Position the track base at the start
       local endCF = CFrame.lookAt(catmullRom(prv, a, b, nxt, 1), catmullRom(prv, a, b, nxt, 1.002))
       if nextPoint.Direction ~= nil then
         endCF = CFrame.lookAt(nextPoint.Position, nextPoint.Position - nextPoint.Direction, Vector3.new(0, 1, 0))
@@ -154,18 +146,6 @@ return function (path: { Types.Point }, pathFolder: Folder): ()
       end
   
       -- Compute the track base properties
-      local localBoundingBoxOffset: Vector3, localBoundingBoxSize: Vector3 = computeTwoBoundingBoxes(startCF, TrackBaseParts)
-      local center: CFrame = startCF
-      local boundsOffset: Vector3 = localBoundingBoxOffset
-      local size: Vector3 = localBoundingBoxSize
-      center *= CFrame.new(boundsOffset)
-      boundsOffset = Vector3.zero
-
-      local ghostPreview = createGhostPreview(TrackBaseTargets, startCF, localBoundingBoxSize)
-      ghostPreview.hide()
-
-      local sizeOnAxis: number = (axis * size).Magnitude
-
       local placements: { bendPlacement.Placement } = {} :: { bendPlacement.Placement }
       local reversePlacements: { bendPlacement.Placement } = {} :: { bendPlacement.Placement }
 
@@ -179,6 +159,9 @@ return function (path: { Types.Point }, pathFolder: Folder): ()
 
       -- Probe few extra points
       for t = 1.001, 1.01 do table.insert(probedPoints, catmullRom(prv, a, b, nxt, t)) end
+
+      local localBoundingBoxSize: Vector3 = Vector3.new(49, 20, 1)
+      local localBoundingBoxOffset: Vector3 = Vector3.new(0, 10, 0)
 
       local ct: number = 0
       local rct: number = t1 + 1
@@ -208,7 +191,7 @@ return function (path: { Types.Point }, pathFolder: Folder): ()
           if #parts == 0 then break end
         end
         task.wait() 
-        -- lastPart:Destroy()
+        lastPart:Destroy()
         if ct >= rct then break end -- Reached the boundary
 
         -- Calculate the initial placement data
@@ -216,7 +199,7 @@ return function (path: { Types.Point }, pathFolder: Folder): ()
         local prevSize: Vector3 = localBoundingBoxSize
         if #placements > 0 then prevSize = placements[#placements].Size end
         local placement: bendPlacement.Placement = {
-          BoundsOffset = boundsOffset,
+          BoundsOffset = localBoundingBoxOffset,
           Size = copySize,
           Offset = runningPositionNow:Inverse() * cf,
           PreviousSize = prevSize,
@@ -249,14 +232,14 @@ return function (path: { Types.Point }, pathFolder: Folder): ()
           if #parts == 0 then break end
         end
         task.wait() 
-        -- lastPart:Destroy()
+        lastPart:Destroy()
         if ct >= rct then break end -- Reached the boundary
 
         -- Calculate the initial placement data
         local reverseCopySize: Vector3 = localBoundingBoxSize + (deltaSize * rct / t1)
         local prevReverseCopySize: Vector3 = localBoundingBoxSize + (deltaSize * (rct - 1) / t1)
         local reversePlacement: bendPlacement.Placement ={
-          BoundsOffset = boundsOffset,
+          BoundsOffset = localBoundingBoxOffset,
           Size = reverseCopySize,
           Offset = reverseRunningPositionNow:Inverse() * cf,
           PreviousSize = prevReverseCopySize,
@@ -275,15 +258,96 @@ return function (path: { Types.Point }, pathFolder: Folder): ()
         if i == #reversePlacements then -- Remove overlap in the last offset
           local lastPlacement: bendPlacement.Placement = placements[#placements]
           rp.Offset = lastPlacement.CFrame:Inverse() * rp.CFrame
+          rp.CFrame = (lastPlacement.CFrame * rp.Offset):Orthonormalize()
         else
           rp.Offset = reversePlacements[i + 1].CFrame:Inverse() * rp.CFrame -- rp.Offset:Inverse() -- Causing numerical error
+          rp.CFrame = (reversePlacements[i + 1].CFrame * rp.Offset):Orthonormalize()
         end
         -- ( Skipping CFrame adjustment )
         table.insert(placements, rp)
       end
 
+      -- Add end placement
+      local endPlacement: bendPlacement.Placement = {
+        BoundsOffset = localBoundingBoxOffset,
+        Size = localBoundingBoxSize, -- TODO: End size
+        Offset = placements[#placements].CFrame:Inverse() * endCF,
+        PreviousSize = localBoundingBoxSize,
+        CFrame = endCF
+      }
+      table.insert(placements, endPlacement)
+
       -- Place the copies using offsets
-      local runningPosition = startCF
+      local runningPosition = CFrame.new()
+
+      local emLeftWall = AssetService:CreateEditableMesh()
+      local lwbVertex: number = emLeftWall:AddVertex((runningPosition * CFrame.new(localBoundingBoxSize.X / 2, 0, 0)).Position)
+      local lwtVertex: number = emLeftWall:AddVertex((runningPosition * CFrame.new(localBoundingBoxSize.X / 2, 10, 0)).Position)
+      local emRightWall = AssetService:CreateEditableMesh()
+      local rwbVertex: number = emRightWall:AddVertex((runningPosition * CFrame.new(-localBoundingBoxSize.X / 2, 0, 0)).Position)
+      local rwtVertex: number = emRightWall:AddVertex((runningPosition * CFrame.new(-localBoundingBoxSize.X / 2, 10, 0)).Position)
+      local em: EditableMesh = AssetService:CreateEditableMesh()
+      local lVertex: number = em:AddVertex((runningPosition * CFrame.new(localBoundingBoxSize.X / 2, 0, 0)).Position)
+      local rVertex: number = em:AddVertex((runningPosition * CFrame.new(-localBoundingBoxSize.X / 2, 0, 0)).Position)
+      for _, placement in placements do
+        runningPosition = (runningPosition * placement.Offset):Orthonormalize()
+        -- Road
+        local nlVertex: number = em:AddVertex((runningPosition * CFrame.new(localBoundingBoxSize.X / 2, 0, 0)).Position)
+        local nrVertex: number = em:AddVertex((runningPosition * CFrame.new(-localBoundingBoxSize.X / 2, 0, 0)).Position)
+
+        em:AddTriangle(lVertex, nlVertex, nrVertex)
+        em:AddTriangle(lVertex, nrVertex, rVertex)
+        -- em:AddTriangle(lVertex, nrVertex, nlVertex)
+        -- em:AddTriangle(lVertex, rVertex, nrVertex)
+        lVertex = nlVertex
+        rVertex = nrVertex
+
+        -- Left wall
+        local nlwbVertex: number = emLeftWall:AddVertex((runningPosition * CFrame.new(localBoundingBoxSize.X / 2, 0, 0)).Position)
+        local nltVertex: number = emLeftWall:AddVertex((runningPosition * CFrame.new(localBoundingBoxSize.X / 2, 10, 0)).Position)
+        emLeftWall:AddTriangle(lwbVertex, nlwbVertex, nltVertex)
+        emLeftWall:AddTriangle(lwbVertex, nltVertex, lwtVertex)
+        emLeftWall:AddTriangle(lwbVertex, nltVertex, nlwbVertex)
+        emLeftWall:AddTriangle(lwbVertex, lwtVertex, nltVertex)
+        lwbVertex = nlwbVertex
+        lwtVertex = nltVertex
+
+        -- Right wall
+        local nrwbVertex: number = emRightWall:AddVertex((runningPosition * CFrame.new(-localBoundingBoxSize.X / 2, 0, 0)).Position)
+        local nrtVertex: number = emRightWall:AddVertex((runningPosition * CFrame.new(-localBoundingBoxSize.X / 2, 10, 0)).Position)
+        emRightWall:AddTriangle(rwbVertex, nrtVertex, nrwbVertex)
+        emRightWall:AddTriangle(rwbVertex, rwtVertex, nrtVertex)
+        emRightWall:AddTriangle(rwbVertex, nrwbVertex, nrtVertex)
+        emRightWall:AddTriangle(rwbVertex, nrtVertex, rwtVertex)
+        rwbVertex = nrwbVertex
+        rwtVertex = nrtVertex
+      end
+
+      local roadPart = AssetService:CreateMeshPartAsync(Content.fromObject(em))
+      roadPart.CFrame = startCF
+      roadPart.Anchored = true
+      roadPart.Parent = Workspace
+      roadPart.Name = "Road"
+      roadPart.Color = Color3.new(0.1, 0.1, 0.1)
+      roadPart:AddTag('ROAD')
+
+      local leftWallPart = AssetService:CreateMeshPartAsync(Content.fromObject(emLeftWall))
+      leftWallPart.CFrame = startCF
+      leftWallPart.Anchored = true
+      leftWallPart.Parent = Workspace
+      leftWallPart.Name = "LeftWall"
+      leftWallPart.Color = Color3.new(1, 1, 1)
+      leftWallPart:AddTag('WALL')
+
+      local rightWallPart = AssetService:CreateMeshPartAsync(Content.fromObject(emRightWall))
+      rightWallPart.CFrame = startCF
+      rightWallPart.Anchored = true
+      rightWallPart.Parent = Workspace
+      rightWallPart.Name = "RightWall"
+      rightWallPart.Color = Color3.new(1, 1, 1)
+      rightWallPart:AddTag('WALL')
+
+      --[[
       local lastCopy = TrackBaseTargets
       local lastBasis = {
         CFrame = center,
@@ -342,6 +406,7 @@ return function (path: { Types.Point }, pathFolder: Folder): ()
       prev = lastCopy
 
       ghostPreview.trim()
+      ]]
     end
   end
 end
