@@ -42,7 +42,8 @@ CmdHandler['CREATE_ENV'] = function (self: CmdHandler, data: CreateEnvData, envI
   local suc: boolean, res = pcall(function()
     PhysicsService:RegisterCollisionGroup(CollisionGroupName)
 
-    for _, existingCG: string in ipairs(PhysicsService:GetCollisionGroups()) do
+    for _: number, existingCGData: any in ipairs(PhysicsService:GetRegisteredCollisionGroups()) do
+      local existingCG: string = existingCGData.name
       if CarsController.IsEnvCollisionGroup(existingCG) and existingCG ~= CollisionGroupName then
         PhysicsService:CollisionGroupSetCollidable(CollisionGroupName, existingCG, false) -- Disable collisions between different envs
       end
@@ -79,7 +80,9 @@ end
 type SpawnAgentsData = { agents: { string } }
 CmdHandler['SPAWN_AGENTS'] = function (self: CmdHandler, data: SpawnAgentsData, envId: string?): () 
   if envId == nil then return end
-  CmdHandler['CREATE_ENV'](self, {} :: CreateEnvData, envId) -- Ensure env exists
+  if self.Envs[envId] == nil then
+    CmdHandler['CREATE_ENV'](self, {} :: CreateEnvData, envId) -- Ensure env exists
+  end
   local envData: EnvData = self.Envs[envId]
 
   local currentAgentModels: { Instance } = {}
@@ -144,7 +147,7 @@ CmdHandler['CLOSE'] = function (self: CmdHandler, data: CloseData, envId: string
   local envData: EnvData? = self.Envs[envId]
   if envData == nil then return end
 
-  CmdHandler['REMOVE_AGENTS'](self, { agents = envData.Agents } :: RemoveAgentsData, envId)
+  CmdHandler['REMOVE_AGENTS'](self, { agents = table.clone(envData.Agents) } :: RemoveAgentsData, envId)
   self.Envs[envId] = nil
 
   local CollisionGroupName: string = CarsController.GetEnvCollisionGroup(envId)
@@ -227,12 +230,12 @@ CmdHandler['PING'] = function (self: CmdHandler, _: FreezeData, envId: string?):
 CmdHandler.Handle = function (self: CmdHandler, msg: BackendMessage): ()
   local command: string = msg.command
   local data: any = msg.data
-  local envid: string? = msg.env_id
+  local envid: string? = msg.envid
 
   local handleFunc: any = CmdHandler[command]
   if handleFunc then
-    local success: boolean = pcall(handleFunc, self, data, envid)
-    if not success then warn(`Error handling command {command} for env {envid} - {data}`) end
+    local success: boolean, res = pcall(handleFunc, self, data, envid)
+    if not success then warn(`Error handling command {command} for env {envid} - {res}`) end
   else
     warn(`Unknown command received: {command}`)
   end
@@ -342,7 +345,7 @@ CmdHandler.Setup = function (self: CmdHandler): ()
         local wasTerminationPending: boolean = CarData.TerminationPending
         local wasTruncationPending: boolean = CarData.TruncationPending
         if wasTerminationPending or wasTruncationPending then -- Respawn the car due to termination and/or truncation (so that we providfe fresh data)
-          CmdHandler['SPAWN_AGENTS'](self, { agents = { AgentId } } :: SpawnAgentsData, EnvId)
+          CmdHandler['RESET'](self, { agents = { AgentId } } :: ResetData, EnvId)
           CarData = CarsController.GetCarData(AgentId) -- Retrieve fresh data
           if CarData == nil then continue end
         end
@@ -372,7 +375,7 @@ CmdHandler.Setup = function (self: CmdHandler): ()
     end
     if ConsecutiveUnresponsiveTicks > 250 then
       warn('No cars have updated their state for a long time, closing env')
-      self.Cleanup()
+      self:Cleanup()
     end
 
     local success: boolean, result = pcall(function ()

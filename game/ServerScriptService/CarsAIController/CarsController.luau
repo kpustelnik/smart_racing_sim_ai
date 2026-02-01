@@ -25,7 +25,7 @@ CarsController.PickSpawns = function (count: number, ignoreWithParts: { Instance
   local AllSpawns: { BasePart } = CarsController.GetSpawns()
   local PickedSpawns: { BasePart } = {}
   for _ = 1, count do
-    local pickedSpawn: BasePart?
+    local pickedSpawn: BasePart? = nil
     while true do
       if #AllSpawns == 0 then
         pickedSpawn = nil
@@ -52,6 +52,7 @@ CarsController.PickSpawns = function (count: number, ignoreWithParts: { Instance
           continue
         end
       end
+      break
     end
 
     if pickedSpawn == nil then continue end
@@ -205,8 +206,10 @@ CarsController.CleanupCar = function (Id: string): ()
     local conn: RBXScriptConnection = table.remove(carData.Connections)
     conn:Disconnect()
   end
-  if carData.Model ~= nil then
-    pcall(function() carData.Model:Destroy() end)
+
+  local carModel: Model? = carData.Model
+  if carModel ~= nil then
+    pcall(function() carModel:Destroy() end)
     carData.Model = nil
   end
   CarsController.CurrentCars[Id] = nil
@@ -303,7 +306,7 @@ CarsController.SetupCar = function (Id: string, EnvId: string, Model: string, Sp
   CarsController.CleanupCar(Id)
 
   local CGName: string = CarsController.GetEnvCollisionGroup(EnvId)
-  local CarInstance: Model? = CarsController.SpawnCars({ Model }, Spawn, CGName)[1]
+  local CarInstance: Model? = CarsController.SpawnCars({ Model }, { Spawn }, CGName)[1]
   if CarInstance == nil then return nil end
 
   CarInstance:SetAttribute('ENV', EnvId)
