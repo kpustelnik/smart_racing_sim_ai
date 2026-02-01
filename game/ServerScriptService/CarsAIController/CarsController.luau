@@ -108,6 +108,7 @@ type RayConfig = {
 
 local EnableDebugParts: boolean = true
 local RaycastOffset = Vector3.new(0, 5, 0)
+local shouldIgnoreTrack: boolean = false -- TODO: Extend the walls and ignore the track itself potentially
 CarsController.GetRaycasts = function (car: Model): { number }?
   local Config: any = CarsController.LoadConfig(car)
   if Config == nil then return end
@@ -128,20 +129,26 @@ CarsController.GetRaycasts = function (car: Model): { number }?
     local params: RaycastParams = RaycastParams.new()
     params.FilterType = Enum.RaycastFilterType.Exclude
     params.RespectCanCollide = true
+    local IgnoredDescendants = {}
     if rc.IgnoreCars then
-      params.FilterDescendantsInstances = { CarsFolder }
+      table.insert(IgnoredDescendants, CarsFolder)
     else
       local Env: unknown? = car:GetAttribute('ENV')
-      local SameEnvCars: { Instance } = {}
       if Env ~= nil and typeof(Env) == 'string' then
         for _, otherCar: Instance in pairs(CarsFolder:GetChildren()) do
           if otherCar:IsA('Model') and otherCar:GetAttribute('ENV') == Env then
-            table.insert(SameEnvCars, otherCar)
+            table.insert(IgnoredDescendants, otherCar)
           end
         end
       end
-      params.FilterDescendantsInstances = SameEnvCars
     end
+    if shouldIgnoreTrack then
+      local RoadParts: { Instance } = CollectionService:GetTagged('ROAD')
+      for _, roadPart: Instance in ipairs(RoadParts) do
+        if roadPart:IsA('BasePart') then table.insert(IgnoredDescendants, roadPart) end
+      end
+    end
+    params.FilterDescendantsInstances = IgnoredDescendants
 
     local raycastResult: RaycastResult<BasePart>? = Workspace:Raycast(startPos + RaycastOffset, targetPos - startPos, params)
 

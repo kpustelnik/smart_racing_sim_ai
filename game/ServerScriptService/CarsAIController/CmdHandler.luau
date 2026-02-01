@@ -273,8 +273,8 @@ CmdHandler.GetReward = function (self: CmdHandler, carData: CarsController.CarDa
   local totalProgress: number = carData.CurrentLap + trackProgress
   if totalProgress > carData.LastBestProgress then
     carData.LastBestProgress = totalProgress
-    carData.LastBestProgressTime = os.time()
-  elseif os.time() - carData.LastBestProgressTime > 4 and carData.FreezeStart ~= nil then
+    carData.LastBestProgressTime = tick()
+  elseif tick() - carData.LastBestProgressTime > 4 and carData.FreezeStart == nil then
     carData.TruncationPending = true -- Stuck for too long
   end
 

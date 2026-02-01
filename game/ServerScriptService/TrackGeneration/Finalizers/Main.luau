@@ -98,6 +98,7 @@ local function catmullRom(p0: Vector3, p1: Vector3, p2: Vector3, p3: Vector3, t:
 end
 
 return function (path: { Types.Point }, pathFolder: Folder): ()
+  -- Checkpoints
   local checkpointIndex = 0
   local function createCheckpoint(cf)
     local i = checkpointIndex
@@ -117,6 +118,7 @@ return function (path: { Types.Point }, pathFolder: Folder): ()
     checkpointPart.Parent = Checkpoints
   end
 
+  -- Path generation
   local prev = nil
   local prevBasis = nil
   for i, curPoint: Types.Point in ipairs(path) do
@@ -144,13 +146,14 @@ return function (path: { Types.Point }, pathFolder: Folder): ()
         startCF = CFrame.lookAt(curPoint.Position, curPoint.Position + curPoint.Direction, Vector3.new(0, 1, 0))
       end
       createCheckpoint(startCF)
-      cTrackBase:PivotTo(startCF)
+      cTrackBase:PivotTo(startCF) -- Position the track base at the start
       local endCF = CFrame.lookAt(catmullRom(prv, a, b, nxt, 1), catmullRom(prv, a, b, nxt, 1.002))
       if nextPoint.Direction ~= nil then
         endCF = CFrame.lookAt(nextPoint.Position, nextPoint.Position - nextPoint.Direction, Vector3.new(0, 1, 0))
         createCheckpoint(endCF)
       end
   
+      -- Compute the track base properties
       local localBoundingBoxOffset: Vector3, localBoundingBoxSize: Vector3 = computeTwoBoundingBoxes(startCF, TrackBaseParts)
       local center: CFrame = startCF
       local boundsOffset: Vector3 = localBoundingBoxOffset
@@ -177,141 +180,91 @@ return function (path: { Types.Point }, pathFolder: Folder): ()
       -- Probe few extra points
       for t = 1.001, 1.01 do table.insert(probedPoints, catmullRom(prv, a, b, nxt, t)) end
 
-      local lastPos: Vector3 = startCF.Position
-      local reverseLastPos: Vector3 = Vector3.new(math.huge, math.huge, math.huge)
-
       local ct: number = 0
       local rct: number = t1 + 1
       local runningPositionNow: CFrame = startCF
       local reverseRunningPositionNow: CFrame = endCF
       while true do
         -- Find the start point
+        local lastPart = Instance.new('Part')
+        lastPart.Size = localBoundingBoxSize
+        lastPart.Anchored = true
+        lastPart.CFrame = runningPositionNow * CFrame.new(localBoundingBoxOffset)
+        lastPart.Transparency = 0.5
+        lastPart.Parent = Workspace
+
+        local cf: CFrame? = nil
         while true do 
           ct += 1
           if ct >= rct then break end -- Reached the boundary
-          if (probedPoints[ct] - lastPos).Magnitude > sizeOnAxis then break end -- Found a good starting point (minimum size offset)
-        end
-        if ct >= rct then break end -- Reached the boundary
+          cf = CFrame.lookAt(probedPoints[ct], probedPoints[math.clamp(ct + 1, 1, #probedPoints)])
+          
+          local overlapParams = OverlapParams.new()
+          overlapParams.FilterType = Enum.RaycastFilterType.Include
+          overlapParams.FilterDescendantsInstances = { lastPart }
+          overlapParams.MaxParts = 1
 
-        if #placements > 0 then -- Apply previous offset if present
-          runningPositionNow *= placements[#placements].Offset
-          runningPositionNow = runningPositionNow:Orthonormalize()
+          local parts = Workspace:GetPartBoundsInBox(cf * CFrame.new(localBoundingBoxOffset), localBoundingBoxSize, overlapParams)
+          if #parts == 0 then break end
         end
+        task.wait() 
+        -- lastPart:Destroy()
+        if ct >= rct then break end -- Reached the boundary
 
         -- Calculate the initial placement data
         local copySize: Vector3 = localBoundingBoxSize + (deltaSize * ct / t1)
-        local prevSize = localBoundingBoxSize
+        local prevSize: Vector3 = localBoundingBoxSize
         if #placements > 0 then prevSize = placements[#placements].Size end
         local placement: bendPlacement.Placement = {
           BoundsOffset = boundsOffset,
           Size = copySize,
-          Offset = CFrame.new(),
+          Offset = runningPositionNow:Inverse() * cf,
           PreviousSize = prevSize,
         }
-        
-        local originalOffset = CFrame.new(-axis * sizeOnAxis)
-        local testPosition: Vector3
-        local minCtFoundGlobal = math.huge
-        while true do -- Bend and check if a better curve point exists
-          local newMinimumFound = false
-          placement.Offset = originalOffset -- Apply original offset
 
-          local nxtPos = probedPoints[math.clamp(ct + 5, 1, #probedPoints)]
-
-          local cf = CFrame.lookAt(runningPositionNow.Position, nxtPos)
-          local rotation = runningPositionNow.Rotation:ToObjectSpace(cf.Rotation):Orthonormalize()
-          bendPlacement(placement, axis, rotation, -1, 0, 1)
-
-          testPosition = (runningPositionNow * placement.Offset).Position
-          local minCtFound = math.huge
-          while ct < rct and (testPosition - probedPoints[ct]).Magnitude > (testPosition - probedPoints[ct + 1]).Magnitude do
-            -- Increase the point index as long as there is any better match
-            ct += 1
-          end
-          minCtFound = ct
-          while ct > 1 and (testPosition - probedPoints[ct]).Magnitude > (testPosition - probedPoints[ct - 1]).Magnitude do
-            ct -= 1
-            minCtFound = ct
-          end
-          if minCtFound < minCtFoundGlobal then
-            minCtFoundGlobal = minCtFound
-            newMinimumFound = true
-          end
-          if not newMinimumFound then break end
-        end
-        if ct >= rct then break end
-
-        -- Adjust the offset to align with the probed point's Y position
-        -- placement.Offset += Vector3.new(0, probedPoints[ct].Y - testPosition.Y, 0)
-        placement.CFrame = (runningPositionNow * placement.Offset):Orthonormalize()
+        runningPositionNow = (runningPositionNow * placement.Offset):Orthonormalize()
+        placement.CFrame = runningPositionNow
         table.insert(placements, placement)
-        lastPos = probedPoints[ct]
 
         -- Find the reverse point
+        lastPart = Instance.new('Part')
+        lastPart.Size = localBoundingBoxSize
+        lastPart.Anchored = true
+        lastPart.CFrame = reverseRunningPositionNow * CFrame.new(localBoundingBoxOffset)
+        lastPart.Transparency = 0.5
+        lastPart.Parent = Workspace
+
+        cf = nil
         while true do 
           rct -= 1
           if ct >= rct then break end -- Reached the boundary
-          if (probedPoints[rct] - reverseLastPos).Magnitude > sizeOnAxis then break end -- Found a good starting point (minimum size offset) 
+          cf = CFrame.lookAt(probedPoints[rct], probedPoints[math.clamp(rct + 1, 1, #probedPoints)])
+          
+          local overlapParams = OverlapParams.new()
+          overlapParams.FilterType = Enum.RaycastFilterType.Include
+          overlapParams.FilterDescendantsInstances = { lastPart }
+          overlapParams.MaxParts = 1
+
+          local parts = Workspace:GetPartBoundsInBox(cf * CFrame.new(localBoundingBoxOffset), localBoundingBoxSize, overlapParams)
+          if #parts == 0 then break end
         end
+        task.wait() 
+        -- lastPart:Destroy()
         if ct >= rct then break end -- Reached the boundary
 
-        if #reversePlacements > 0 then -- Apply previous offset if present
-          reverseRunningPositionNow *= reversePlacements[#reversePlacements].Offset
-          reverseRunningPositionNow = reverseRunningPositionNow:Orthonormalize()
-        end
-
-        -- Calculate the initial reverse placement data
+        -- Calculate the initial placement data
         local reverseCopySize: Vector3 = localBoundingBoxSize + (deltaSize * rct / t1)
         local prevReverseCopySize: Vector3 = localBoundingBoxSize + (deltaSize * (rct - 1) / t1)
         local reversePlacement: bendPlacement.Placement ={
           BoundsOffset = boundsOffset,
           Size = reverseCopySize,
-          Offset = CFrame.new(),
+          Offset = reverseRunningPositionNow:Inverse() * cf,
           PreviousSize = prevReverseCopySize,
         }
-        
-        local reverseOriginalOffset = CFrame.new(axis * sizeOnAxis)
-        if rct == t1 then reverseOriginalOffset = CFrame.new() end
-        local maxCtFoundGlobal = -1
-        while true do -- Bend and check if a better curve point exists
-          local newMaximumFound = false
-          reversePlacement.Offset = reverseOriginalOffset -- Apply original offset
 
-          local revPos = probedPoints[math.clamp(rct - 5, 1, #probedPoints)]
-
-          local cf = CFrame.lookAt(revPos, reverseRunningPositionNow.Position)
-          if rct == t1 then cf = endCF end
-          local rotation = reverseRunningPositionNow.Rotation:ToObjectSpace(cf.Rotation):Orthonormalize()
-          bendPlacement(reversePlacement, -axis, rotation, -1, 0, 1)
-
-          testPosition = (reverseRunningPositionNow * reversePlacement.Offset).Position
-          local maxCtFound = -1
-          while ct < rct and (testPosition - probedPoints[rct]).Magnitude > (testPosition - probedPoints[rct - 1]).Magnitude do
-            -- Decrease the point index as long as there is any better match
-            rct -= 1
-          end
-          maxCtFound = rct
-          while rct < #probedPoints and (testPosition - probedPoints[rct]).Magnitude > (testPosition - probedPoints[rct + 1]).Magnitude do
-            rct += 1
-            maxCtFound = rct
-          end
-          if maxCtFound < maxCtFoundGlobal then
-            maxCtFoundGlobal = maxCtFound
-            newMaximumFound = true
-          end
-          if not newMaximumFound then break end
-        end
-        if ct >= rct then break end -- Reached the boundary
-
-        -- Adjust the offset to align with the probed point's Y position
-        -- reversePlacement.Offset += Vector3.new(0, probedPoints[rct].Y - testPosition.Y, 0)
-        reversePlacement.CFrame = (reverseRunningPositionNow * reversePlacement.Offset):Orthonormalize()
+        reverseRunningPositionNow = (reverseRunningPositionNow * reversePlacement.Offset):Orthonormalize()
+        reversePlacement.CFrame = reverseRunningPositionNow
         table.insert(reversePlacements, reversePlacement)
-        reverseLastPos = probedPoints[rct]
-
-        --[[
-        if copySize.X > 0.001 and copySize.Y > 0.001 and copySize.Z > 0.001 then end -- Don't put too small parts 
-        ]]
       end
       -- Remove middle placement to avoid overlap
       if #placements > 1 then table.remove(placements, #placements) end
@@ -353,7 +306,7 @@ return function (path: { Types.Point }, pathFolder: Folder): ()
           Size = size,
         }
         Terrain:FillBlock(thisInfo.CFrame * CFrame.new(0, -15, 0), size + Vector3.new(7, 27, 3), Enum.Material.Asphalt)
-        Terrain:FillBlock(thisInfo.CFrame * CFrame.new(0, 15, 0), size + Vector3.new(2, 36, 3), Enum.Material.Air)
+        Terrain:FillBlock(thisInfo.CFrame * CFrame.new(0, 15, 0), size + Vector3.new(3, 36, 5), Enum.Material.Air)
 
         local resizeAlignResults = resizeAlignPairs(lastCopy, thisCopy, lastBasis, thisInfo, axis, resizeAlignPairsCache)
         for j, resizeAlignResult in resizeAlignResults do

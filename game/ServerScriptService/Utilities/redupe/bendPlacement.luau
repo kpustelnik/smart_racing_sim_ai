@@ -22,8 +22,7 @@ local function fixZeroSize(v: Vector3): Vector3
 	)
 end
 
-local function bendPlacement(placement: Placement, axis: Vector3, relativeBend: CFrame,
-	touchSide: number, paddingAmount: number, spacingMultiplier: number): ()
+local function bendPlacement(placement: Placement, axis: Vector3, relativeBend: CFrame, touchSide: number, paddingAmount: number, spacingMultiplier: number): ()
 	local relativeOffset: CFrame = placement.Offset
 	local referenceSize: Vector3 = placement.PreviousSize
 	local paraSize: number = referenceSize:Dot(axis)
