@@ -89,10 +89,10 @@ return function (path: { Types.Point }, pathFolder: Folder): ()
 
       local all_lPoints: { Vector3? }, rev_all_lPoints: { Vector3? } = {}, {}
       local all_rPoints: { Vector3? }, rev_all_rPoints: { Vector3? } = {}, {}
-      table.insert(all_lPoints, startCF * CFrame.new(-localBoundingBoxSize.X / 2, 0, 0))
-      table.insert(all_rPoints, startCF * CFrame.new(localBoundingBoxSize.X / 2, 0, 0))
-      table.insert(rev_all_lPoints, endCF * CFrame.new(-localBoundingBoxSize.X / 2, 0, 0))
-      table.insert(rev_all_rPoints, endCF * CFrame.new(localBoundingBoxSize.X / 2, 0, 0))
+      table.insert(all_lPoints, (startCF * CFrame.new(-localBoundingBoxSize.X / 2, 0, 0)).Position)
+      table.insert(all_rPoints, (startCF * CFrame.new(localBoundingBoxSize.X / 2, 0, 0)).Position)
+      table.insert(rev_all_lPoints, (endCF * CFrame.new(-localBoundingBoxSize.X / 2, 0, 0)).Position)
+      table.insert(rev_all_rPoints, (endCF * CFrame.new(localBoundingBoxSize.X / 2, 0, 0)).Position)
       local runningPositionNow: CFrame = startCF
       local reverseRunningPositionNow: CFrame = endCF
       local ct: number = 0
@@ -166,10 +166,12 @@ return function (path: { Types.Point }, pathFolder: Folder): ()
         table.insert(all_lPoints, rev_all_lPoints[i])
         table.insert(all_rPoints, rev_all_rPoints[i])
       end
-      for _, cf in ipairs(all_cfs) do
+      for cct = 1, t1 do
+        local cf: CFrame = CFrame.lookAt(probedPoints[cct], probedPoints[math.clamp(cct + 1, 1, #probedPoints)])
         Terrain:FillBlock(cf * CFrame.new(0, -13, 0), Vector3.new(localBoundingBoxSize.X, 0, localBoundingBoxOffset.Z) + Vector3.new(4, 27, 3), Enum.Material.Asphalt)
       end
-      for _, cf in ipairs(all_cfs) do
+      for cct = 1, t1 do
+        local cf: CFrame = CFrame.lookAt(probedPoints[cct], probedPoints[math.clamp(cct + 1, 1, #probedPoints)])
         Terrain:FillBlock(cf * CFrame.new(0, 13 + localBoundingBoxSize.Y / 2, 0), localBoundingBoxSize + Vector3.new(6, 36, 5), Enum.Material.Air)
       end
 

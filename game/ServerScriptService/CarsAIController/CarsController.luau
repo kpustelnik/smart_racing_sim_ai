@@ -107,7 +107,7 @@ type RayConfig = {
 }
 
 local EnableDebugParts: boolean = false
-local RaycastOffset = Vector3.new(0, 5, 0)
+local RaycastOffset = Vector3.new(0, 7, 0)
 local shouldIgnoreTrack: boolean = false -- TODO: Extend the walls and ignore the track itself potentially
 CarsController.GetRaycasts = function (car: Model): { number }?
   local Config: any = CarsController.LoadConfig(car)

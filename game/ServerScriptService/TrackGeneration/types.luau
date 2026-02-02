@@ -1,6 +1,6 @@
 --!strict
 
-export type Point = {
+export type Poixnt = {
   Position: Vector3,
   Characteristics: number,
   Special: string?,
@@ -10,7 +10,8 @@ export type Point = {
   
   -- Roblox only
   Part: BasePart?,
-  Collider: BasePart?
+  Collider: BasePart?,
+  Object: Instance?
 }
 
 return {}

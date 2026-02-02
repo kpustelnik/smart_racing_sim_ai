@@ -1,10 +1,13 @@
 --!strict
-local modelId: string = 'car_new'
-local carModel: string = 'Car'
+local modelId: string = 'telsa_new'
+local carModel: string = 'Telsa'
 local wsUrl: string = `ws://localhost:8000/ws/{modelId}`
-local enableCollisions: boolean = true
+local enableCollisions: boolean = false
 
+task.wait(5) -- Wait for other scripts to load
 local TrackGeneration = require(script.Parent:WaitForChild('TrackGeneration'))
+local trackSuccess: boolean = TrackGeneration('Main', 'Main')
+if not trackSuccess then error("Failed to generate the track") end
 
 local CarsAIController = require(script.Parent:WaitForChild("CarsAIController"))
 
