@@ -220,7 +220,8 @@ local PriorityQueue = require(Utilities:WaitForChild('PrioritiyQueue'))
 local queue = PriorityQueue()
 
 -- Perform connecting phase
-local Start: Point, End: Point = Points[1], Points[#Points]
+local StartId: number, EndId: number = 1, #Points
+local Start: Point, End: Point = Points[StartId], Points[EndId]
 for _, cPoint: Point in ipairs(Points) do
   if cPoint.Special == 'START' then
     Start = cPoint
@@ -235,7 +236,7 @@ pathFolder.Parent = Workspace
 local debugParts: boolean = true
 local genPath = function (path)
   pathFolder:ClearAllChildren()
-  if debugParts then
+  if debugParts then -- Create connections for debug to show the currently checked combination
     for i, curPoint: Point in ipairs(path) do
       local nextPoint: Point? = if i ~= #path then path[i + 1] else nil
       if curPoint.Next == nextPoint then continue end
@@ -252,6 +253,196 @@ local genPath = function (path)
     end
   end
 end
+
+-- Data for remote environment
+local cpm3D = {}
+local cpm2D = {}
+local measure2D = {}
+local imatrix = {}
+local remoteData = {
+  measure = measure2D,
+  CanPickMatrix3D = cpm3D,
+  CanPickMatrix2D = cpm2D,
+  IntersectionsMatrix = imatrix
+}
+
+for a = 1, #Points, 1 do
+  local pointA: Point = Points[a]
+  cpm2D[a] = {}
+  cpm3D[a] = {}
+  imatrix[a] = {}
+  measure2D[a] = {}
+  for b = 1, #Points, 1 do
+    local pointB: Point = Points[b]
+    local abDirection: Vector3 = pointB.Position - pointA.Position
+    cpm2D[a][b] = a ~= b 
+    if pointA.Next == pointB then -- Skip if b is next of a
+      if cpm2D[a][b] then 
+        cpm2D[a][b] = abDirection.Magnitude >= minimumDistance and abDirection.Magnitude <= maxDistance -- (Condition 5)
+      end
+      if cpm2D[a][b] then -- (Condition 4)
+        if a ~= StartId and b ~= EndId and intersects(pointA.Position, pointB.Position, End.Position, Start.Position) then
+          cpm2D[a][b] = false
+        end
+      end
+
+      if cpm2D[a][b] then -- (Condition 6)
+        -- Check if the path does not go through a prebuilt structure (unless the starting node or the ending node belongs to the structure)
+        local currentColliders: { BasePart } = {}
+
+        for _, collider in ipairs(CollidersFolder:GetChildren()) do
+          if not collider:IsA('BasePart') then continue end
+          if pointA.Collider == collider or pointB.Collider == collider then continue end
+          table.insert(currentColliders, collider)
+        end
+
+        local params: RaycastParams = RaycastParams.new()
+        params.FilterDescendantsInstances = currentColliders
+        params.FilterType = Enum.RaycastFilterType.Include
+        params.IgnoreWater = true
+        local collideRaycast: RaycastResult? = Workspace:Raycast(pointA.Position, pointB.Position - pointA.Position, params)
+        if collideRaycast ~= nil then continue end
+      end
+    end
+
+    if cpm2D[a][b] then -- (Condition 6 also but more directly)
+      -- Check if the track does not directly through an object
+      local raycast: RaycastResult? = Workspace:Raycast(pointA.Position, pointB.Position - pointA.Position)
+      if raycast ~= nil then
+        if raycast.Instance:IsDescendantOf(PrebuiltObjects) then continue end
+      end
+    end
+
+    -- Add measure
+    measure2D[a][b] = abDirection.Magnitude
+    
+    cpm3D[a][b] = {}
+    imatrix[a][b] = {}
+    for c = 1, #Points, 1 do
+      local pointC: Point = Points[c]
+      local bcDirection: Vector3 = pointC.Position - pointB.Position
+      cpm3D[a][b][c] = true -- Assume can connect
+      imatrix[a][b][c] = {}
+      for d = 1, #Points, 1 do
+        local pointD: Point = Points[d]
+        imatrix[a][b][c][d] = true
+        if a ~= b and a ~= c and a ~= d and b ~= c and b ~= d and c ~= d then
+          if intersects(pointA.Position, pointB.Position, pointC.Position, pointD.Position) then -- (Condition 3)
+            imatrix[a][b][c][d] = false
+          end
+        end
+      end
+    end
+  end
+end
+
+-- Requirements:
+-- 1. No two points can repeat in path (Do in ortools)
+-- 2. No direct connection between end and start (mitigated by minimum path points)
+-- 3. No intersection with previous path (Done)
+-- 4. No intersection with not existing path between end and start (Done)
+-- 5. Respect minimum and maximum distance (Done)
+-- 6. Do not collide with prebuilt structures (Done)
+--[[
+  local lastDirection: Vector3? = if lastPoint.Direction ~= nil then lastPoint.Direction elseif #curPath > 1 then (lastPoint.Position - curPath[#curPath - 1].Position) else nil
+  if lastDirection == nil then continue end -- Shouldn't generally happen
+
+  for _, newPoint: Point in ipairs(Points) do
+    -- Check intersections
+    if lastPoint ~= Start and newPoint ~= End and intersects(lastPoint.Position, newPoint.Position, End.Position, Start.Position) then
+      continue
+    end
+    local doesIntersect: boolean = false
+    for i = 1, #curPath - 2 do
+      if intersects(lastPoint.Position, newPoint.Position, curPath[i].Position, curPath[i + 1].Position) then
+        doesIntersect = true
+        break
+      end
+    end
+    if doesIntersect then continue end
+
+    -- Ensure every path is far enough
+    local tooClose = false
+    for i = 1, #curPath - 2 do
+      if getPathDistance(curPath[i].Position, curPath[i + 1].Position, newPoint.Position) < pathDistance then tooClose = true; break end
+      if getPathDistance(lastPoint.Position, newPoint.Position, curPath[i].Position) < pathDistance then tooClose = true; break end
+    end
+    if tooClose then continue end
+
+    local curDirection: Vector3 = newPoint.Position - lastPoint.Position
+    local angle = angleBetween(curDirection, lastDirection)
+    local normalizedAngle = angle / math.pi
+    if math.abs(normalizedAngle) >= 2/3 then continue end
+    if newPoint.Direction ~= nil and math.abs(angleBetween(curDirection, -newPoint.Direction) / math.pi) > 1/4 then continue end
+    if lastPoint.Direction ~= nil and math.abs(angleBetween(curDirection, lastPoint.Direction) / math.pi) > 1/4 then continue end
+    
+    -- Check if the path does not go through a prebuilt structure (unless the starting node or the ending node belongs to the structure)
+    local currentColliders: { BasePart } = {}
+
+    for _, collider in ipairs(CollidersFolder:GetChildren()) do
+      if not collider:IsA('BasePart') then continue end
+      if lastPoint.Collider == collider or newPoint.Collider == collider then continue end
+      table.insert(currentColliders, collider)
+    end
+
+    local params: RaycastParams = RaycastParams.new()
+    params.FilterDescendantsInstances = currentColliders
+    params.FilterType = Enum.RaycastFilterType.Include
+    params.IgnoreWater = true
+    local collideRaycast: RaycastResult? = Workspace:Raycast(lastPoint.Position, newPoint.Position - lastPoint.Position, params)
+    if collideRaycast ~= nil then continue end
+
+    -- Check if the track does not directly through an object
+    local raycast: RaycastResult? = Workspace:Raycast(lastPoint.Position, newPoint.Position - lastPoint.Position)
+    if raycast ~= nil then
+      if raycast.Instance:IsDescendantOf(PrebuiltObjects) then continue end
+    end
+    
+    local measure: number = distance
+    if lastPoint.Characteristics == 0 then
+      measure += math.abs(normalizedAngle) * 200
+    elseif lastPoint.Characteristics == 1 then
+      measure -= math.abs(normalizedAngle) * 100
+    end
+    measure = measure + 300 * (math.abs(#curPath - targetPoints) - targetPoints) -- Prefer longer tracks
+    if #curPath > targetPoints then
+      measure = measure + (End.Position - newPoint.Position).Magnitude
+    end
+    for _, point in ipairs(curPath) do
+      if point.Bonus == nil then continue end
+      measure = measure + point.Bonus
+    end
+
+    local newPath: { Point } = table.clone(curPath)
+    table.insert(newPath, newPoint)
+    if newPoint.Next ~= nil then table.insert(newPath, newPoint.Next) end
+    queue:put(newPath, measure)
+  end
+
+  j = (j + 1)
+  if j % 200 == 0 then
+    genPath(curPath)
+    print(curMeasure, #curPath)
+    -- Trim the queue
+    --[[ Trimming by queue size
+    local newSize = queue.current_size * (1 - trimPercentage)
+    while queue.current_size > newSize do queue:pop() end
+    ]]
+    -- Trimming by path size
+    local newPathSize = math.floor(#curPath * (1 - trimPercentage))
+    -- TODO: Adaptive trimPercentage
+    for i = queue.current_size, 1, -1 do
+      local val = queue.heap_val[i]
+      if #val > newPathSize then -- Remove
+        queue.heap_val[i], queue.heap_pri[i] = queue.heap_val[queue.current_size], queue.heap_pri[queue.current_size]
+        queue.heap_val[queue.current_size], queue.heap_pri[queue.current_size] = nil, nil
+        queue.current_size -= 1
+        queue:sink(i)
+      end
+    end
+    task.wait()
+  end
+]]
 
 queue:put({ Start }, 0) -- Add the starting point to the queue
 local finalPath = nil
@@ -314,26 +505,24 @@ while not queue:empty() do
       table.insert(currentColliders, collider)
     end
 
-    local params = RaycastParams.new()
+    local params: RaycastParams = RaycastParams.new()
     params.FilterDescendantsInstances = currentColliders
     params.FilterType = Enum.RaycastFilterType.Include
     params.IgnoreWater = true
-    local collideRaycast = Workspace:Raycast(lastPoint.Position, newPoint.Position - lastPoint.Position, params)
+    local collideRaycast: RaycastResult? = Workspace:Raycast(lastPoint.Position, newPoint.Position - lastPoint.Position, params)
     if collideRaycast ~= nil then continue end
 
     -- Check if the track does not directly through an object
-    local raycast = Workspace:Raycast(lastPoint.Position, newPoint.Position - lastPoint.Position)
+    local raycast: RaycastResult? = Workspace:Raycast(lastPoint.Position, newPoint.Position - lastPoint.Position)
     if raycast ~= nil then
-      if raycast.Instance:IsDescendantOf(PrebuiltObjects) then
-        continue
-      end
+      if raycast.Instance:IsDescendantOf(PrebuiltObjects) then continue end
     end
     
-    local measure: number = 0
+    local measure: number = distance
     if lastPoint.Characteristics == 0 then
-      measure = distance + math.abs(normalizedAngle) * 200
+      measure += math.abs(normalizedAngle) * 200
     elseif lastPoint.Characteristics == 1 then
-      measure = distance - math.abs(normalizedAngle) * 100
+      measure -= math.abs(normalizedAngle) * 100
     end
     measure = measure + 300 * (math.abs(#curPath - targetPoints) - targetPoints) -- Prefer longer tracks
     if #curPath > targetPoints then
