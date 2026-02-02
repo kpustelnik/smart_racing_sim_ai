@@ -106,7 +106,7 @@ type RayConfig = {
   IgnoreXZRotation: boolean
 }
 
-local EnableDebugParts: boolean = true
+local EnableDebugParts: boolean = false
 local RaycastOffset = Vector3.new(0, 5, 0)
 local shouldIgnoreTrack: boolean = false -- TODO: Extend the walls and ignore the track itself potentially
 CarsController.GetRaycasts = function (car: Model): { number }?

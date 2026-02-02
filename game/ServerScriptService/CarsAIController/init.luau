@@ -16,7 +16,6 @@ return function (wsUrl: string, modelId: string, carModel: string, enableEnvColl
   end
   
   local startTime: number = tick()
-  local lastRefreshTime: number = startTime
   local lastMsgTime: number = startTime
   websocketClient.Opened:Connect(function (): () print(`WebSocket connected for model {modelId}`) end)
   websocketClient.Error:Connect(function(...): () warn("Websocket error encountered:", ...) end)
@@ -37,11 +36,6 @@ return function (wsUrl: string, modelId: string, carModel: string, enableEnvColl
   CurrentCmdHandler:Setup() -- Start simulating
   while websocketClient.ConnectionState ~= Enum.WebStreamClientState.Closed and (tick() - lastMsgTime) <= TimeoutSeconds do
     task.wait(1)
-    if (tick() - lastRefreshTime) >= 60 then
-      msgReceivedConn:Disconnect()
-      msgReceivedConn = websocketClient.MessageReceived:Connect(handleFunc)
-      lastRefreshTime = tick()
-    end
   end
   pcall(function(): () websocketClient:Close() end) -- Try to close gracefully
   warn(`WebSocket for model {modelId} closed.`)

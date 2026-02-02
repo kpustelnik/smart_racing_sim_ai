@@ -54,13 +54,9 @@ return function (path: { Types.Point }, pathFolder: Folder): ()
   end
 
   -- Path generation
-  local prev_lPoint: CFrame? = nil
-  local prev_rPoint: CFrame? = nil
   for i, curPoint: Types.Point in ipairs(path) do
     local nextPoint: Types.Point? = if i ~= #path then path[i + 1] else nil
     if curPoint.Next == nextPoint then -- Check if it's a skip connection (via structure)
-      prev_lPoint = nil
-      prev_rPoint = nil
       continue
     end
     if nextPoint ~= nil then
@@ -91,123 +87,80 @@ return function (path: { Types.Point }, pathFolder: Folder): ()
       local localBoundingBoxSize: Vector3 = Vector3.new(49, 20, 1)
       local localBoundingBoxOffset: Vector3 = Vector3.new(0, 10, 0)
 
-      local XYZtoXZ = function (v: Vector3, y: number): Vector3 return Vector3.new(v.X, y, v.Z) end
       local all_lPoints: { Vector3? }, rev_all_lPoints: { Vector3? } = {}, {}
       local all_rPoints: { Vector3? }, rev_all_rPoints: { Vector3? } = {}, {}
-      if prev_lPoint ~= nil then table.insert(all_lPoints, prev_lPoint.Position) end
-      if prev_rPoint ~= nil then table.insert(all_rPoints, prev_rPoint.Position) end
-      local first_rev_prev_lPoint: CFrame? = nil
-      local first_rev_prev_rPoint: CFrame? = nil
-      local rev_prev_lPoint: CFrame? = nil
-      local rev_prev_rPoint: CFrame? = nil
-      local all_cfs: { CFrame }, rev_all_cfs: { CFrame } = {}, {}
-      local step = 4
-      for ct = 1, t1, step do
-        local rct = t1 - ct + 1
-        -- Forward
-        if ct >= rct + step then break end
+      table.insert(all_lPoints, startCF * CFrame.new(-localBoundingBoxSize.X / 2, 0, 0))
+      table.insert(all_rPoints, startCF * CFrame.new(localBoundingBoxSize.X / 2, 0, 0))
+      table.insert(rev_all_lPoints, endCF * CFrame.new(-localBoundingBoxSize.X / 2, 0, 0))
+      table.insert(rev_all_rPoints, endCF * CFrame.new(localBoundingBoxSize.X / 2, 0, 0))
+      local runningPositionNow: CFrame = startCF
+      local reverseRunningPositionNow: CFrame = endCF
+      local ct: number = 0
+      local rct: number = t1
+      local all_cfs: { CFrame }, rev_all_cfs: { CFrame } = { startCF }, { endCF }
+      while true do
+        -- Find the start point
+        local lastPart = Instance.new('Part')
+        lastPart.Size = localBoundingBoxSize
+        lastPart.Anchored = true
+        lastPart.CFrame = runningPositionNow * CFrame.new(localBoundingBoxOffset)
+        lastPart.Transparency = 0.5
+        lastPart.Parent = Workspace
 
-        local y = probedPoints[ct].Y
-        local cf: CFrame = CFrame.lookAt(probedPoints[ct], XYZtoXZ(probedPoints[math.clamp(ct + 1, 1, #probedPoints)], y))
-        if ct == 1 then cf = startCF end
-        table.insert(all_cfs, cf)
-        
+        local cf: CFrame? = nil
+        while true do 
+          ct += 1
+          if ct >= rct then break end -- Reached the boundary
+          cf = CFrame.lookAt(probedPoints[ct], probedPoints[math.clamp(ct + 1, 1, #probedPoints)])
+          
+          local overlapParams = OverlapParams.new()
+          overlapParams.FilterType = Enum.RaycastFilterType.Include
+          overlapParams.FilterDescendantsInstances = { lastPart }
+          overlapParams.MaxParts = 1
+
+          local parts = Workspace:GetPartBoundsInBox(cf * CFrame.new(localBoundingBoxOffset), localBoundingBoxSize, overlapParams)
+          if #parts == 0 then break end
+        end
+        lastPart:Destroy()
+        if ct >= rct then break end -- Reached the boundary
+
         local lPoint = cf * CFrame.new(-localBoundingBoxSize.X / 2, 0, 0)
         local rPoint = cf * CFrame.new(localBoundingBoxSize.X / 2, 0, 0)
-        if prev_lPoint ~= nil and prev_rPoint ~= nil then
-          -- Check if any is falling behind
-          local diffL = prev_lPoint:PointToObjectSpace(lPoint.Position).Z
-          local diffR = prev_rPoint:PointToObjectSpace(rPoint.Position).Z
-          if diffL > 0 then -- Left is falling behind, should create section with more right points
-            table.insert(all_rPoints, rPoint.Position)
-            prev_rPoint = rPoint
-            table.insert(all_lPoints, 0) -- Instead of nil so that # length works properly
-            -- Adjust last valid left point Y position
-            local lastValidId = #all_lPoints
-            while all_lPoints[lastValidId] == 0 do lastValidId -= 1 end
-            all_lPoints[lastValidId] = Vector3.new(
-              all_lPoints[lastValidId].X,
-              max(all_lPoints[lastValidId].Y, lPoint.Position.Y), -- (all_lPoints[lastValidId].Y * (#all_lPoints - lastValidId) + lPoint.Position.Y) / (#all_lPoints - lastValidId + 1),
-              all_lPoints[lastValidId].Z
-            )
-          elseif diffR > 0 then
-            table.insert(all_lPoints, lPoint.Position)
-            prev_lPoint = lPoint
-            table.insert(all_rPoints, 0)
-            -- Adjust last valid right point Y position
-            local lastValidId = #all_rPoints
-            while all_rPoints[lastValidId] == 0 do lastValidId -= 1 end
-            all_rPoints[lastValidId] = Vector3.new(
-              all_rPoints[lastValidId].X,
-              max(all_rPoints[lastValidId].Y, rPoint.Position.Y), -- (all_rPoints[lastValidId].Y * (#all_rPoints - lastValidId) + rPoint.Position.Y) / (#all_rPoints - lastValidId + 1),
-              all_rPoints[lastValidId].Z
-            )
-          else
-            table.insert(all_lPoints, lPoint.Position)
-            table.insert(all_rPoints, rPoint.Position)
-            prev_lPoint = lPoint
-            prev_rPoint = rPoint
-          end
-        else
-          table.insert(all_lPoints, lPoint.Position)
-          table.insert(all_rPoints, rPoint.Position)
-          prev_lPoint = lPoint
-          prev_rPoint = rPoint
-        end
+        table.insert(all_lPoints, lPoint.Position)
+        table.insert(all_rPoints, rPoint.Position)
+        runningPositionNow = cf
 
-        -- Backwards
-        if ct >= rct then break end
-        local rcf: CFrame = CFrame.lookAt(probedPoints[rct], XYZtoXZ(probedPoints[math.clamp(rct + 1, 1, #probedPoints)], probedPoints[rct].Y))
-        if rct == t1 then rcf = endCF end
-        table.insert(rev_all_cfs, rcf)
-        
-        local rev_lPoint = rcf * CFrame.new(-localBoundingBoxSize.X / 2, 0, 0)
-        local rev_rPoint = rcf * CFrame.new(localBoundingBoxSize.X / 2, 0, 0)
-        if rev_prev_lPoint ~= nil and rev_prev_rPoint ~= nil then
-          -- Check if any is falling behind
-          local diffL = rev_prev_lPoint:PointToObjectSpace(rev_lPoint.Position).Z
-          local diffR = rev_prev_rPoint:PointToObjectSpace(rev_rPoint.Position).Z
-          if diffL < 0 then -- Left is falling behind, should create section with more right points
-            table.insert(rev_all_rPoints, rev_rPoint.Position)
-            rev_prev_rPoint = rev_rPoint
-            table.insert(rev_all_lPoints, 0) -- Instead of nil so that # length works properly
-            -- Adjust last valid left point Y position
-            local lastValidId = #rev_all_lPoints
-            while rev_all_lPoints[lastValidId] == 0 do lastValidId -= 1 end
-            rev_all_lPoints[lastValidId] = Vector3.new(
-              rev_all_lPoints[lastValidId].X,
-              max(rev_all_lPoints[lastValidId].Y, rev_lPoint.Position.Y), -- (rev_all_lPoints[lastValidId].Y * (#rev_all_lPoints - lastValidId) + rev_lPoint.Position.Y) / (#rev_all_lPoints - lastValidId + 1),
-              rev_all_lPoints[lastValidId].Z
-            )
-          elseif diffR < 0 then
-            table.insert(rev_all_lPoints, rev_lPoint.Position)
-            rev_prev_lPoint = rev_lPoint
-            table.insert(rev_all_rPoints, 0)
-            -- Adjust last valid right point Y position
-            local lastValidId = #rev_all_rPoints
-            while rev_all_rPoints[lastValidId] == 0 do lastValidId -= 1 end
-            rev_all_rPoints[lastValidId] = Vector3.new(
-              rev_all_rPoints[lastValidId].X,
-              max(rev_all_rPoints[lastValidId].Y, rev_rPoint.Position.Y), -- (rev_all_rPoints[lastValidId].Y * (#rev_all_rPoints - lastValidId) + rev_rPoint.Position.Y) / (#rev_all_rPoints - lastValidId + 1),
-              rev_all_rPoints[lastValidId].Z
-            )
-          else
-            table.insert(rev_all_lPoints, rev_lPoint.Position)
-            table.insert(rev_all_rPoints, rev_rPoint.Position)
-            rev_prev_lPoint = rev_lPoint
-            rev_prev_rPoint = rev_rPoint
-          end
-        else
-          table.insert(rev_all_lPoints, rev_lPoint.Position)
-          table.insert(rev_all_rPoints, rev_rPoint.Position)
-          rev_prev_lPoint = rev_lPoint
-          rev_prev_rPoint = rev_rPoint
-          first_rev_prev_lPoint = rev_lPoint
-          first_rev_prev_rPoint = rev_rPoint
+        -- Find the reverse point
+        lastPart = Instance.new('Part')
+        lastPart.Size = localBoundingBoxSize
+        lastPart.Anchored = true
+        lastPart.CFrame = reverseRunningPositionNow * CFrame.new(localBoundingBoxOffset)
+        lastPart.Transparency = 0.5
+        lastPart.Parent = Workspace
+
+        cf = nil
+        while true do 
+          rct -= 1
+          if ct >= rct then break end -- Reached the boundary
+          cf = CFrame.lookAt(probedPoints[rct], probedPoints[math.clamp(rct + 1, 1, #probedPoints)])
+          
+          local overlapParams = OverlapParams.new()
+          overlapParams.FilterType = Enum.RaycastFilterType.Include
+          overlapParams.FilterDescendantsInstances = { lastPart }
+          overlapParams.MaxParts = 1
+
+          local parts = Workspace:GetPartBoundsInBox(cf * CFrame.new(localBoundingBoxOffset), localBoundingBoxSize, overlapParams)
+          if #parts == 0 then break end
         end
+        lastPart:Destroy()
+        if ct >= rct then break end -- Reached the boundary
+
+        lPoint = cf * CFrame.new(-localBoundingBoxSize.X / 2, 0, 0)
+        rPoint = cf * CFrame.new(localBoundingBoxSize.X / 2, 0, 0)
+        table.insert(rev_all_lPoints, lPoint.Position)
+        table.insert(rev_all_rPoints, rPoint.Position)
       end
-      prev_lPoint = CFrame.new(rev_all_lPoints[1]) * CFrame.fromEulerAnglesYXZ(first_rev_prev_lPoint:ToEulerAnglesYXZ())
-      prev_rPoint = CFrame.new(rev_all_rPoints[1]) * CFrame.fromEulerAnglesYXZ(first_rev_prev_rPoint:ToEulerAnglesYXZ())
+
       for i = #rev_all_cfs, 1, -1 do
         table.insert(all_cfs, rev_all_cfs[i])
         table.insert(all_lPoints, rev_all_lPoints[i])
