@@ -71,7 +71,7 @@ CheckpointsController.GetTrackProgressState = function (Position: Vector3, Orien
   return math.clamp(DistanceState / CheckpointsController.GetTrackSize(), 0, 1), LastCheckpoint, TrackOrientation
 end
 
--- Script (TODO: Move?)
+-- Script
 local Workspace = game:GetService('Workspace')
 local Checkpoints = Workspace:WaitForChild('Checkpoints')
 CheckpointsController.LoadCheckpoints(Checkpoints)
