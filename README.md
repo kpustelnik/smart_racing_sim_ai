@@ -417,53 +417,24 @@ Reward function is being determined within the `CmdHandler.luau` script. It also
 ```lua
 ... -- Checkpoint tracking
 ... -- Truncation handling (if no progress has been made for a while)
-local reward = 0
+local reward: number = 0
 
 reward += (currentProgress - lastProgress) * 1000
 if reward < 0 then reward *= 20 end -- Multiply additionaly by 20 if the reward negative
 
+-- Apply non-linear speed bonus
 local normalizedSpeed: number = math.clamp(velocity / maxVelocity, 0, 1)
 local speedBonus: number = (math.exp(normalizedSpeed * 2) - 1) * 0.5 -- max ~3.2 at full speed
 reward += speedBonus
 
--- non-linear speed bonus (exponential scaling)
-  local carEngine = carData.CarEngine
-  local velocityStatus: number = carEngine:GetAttribute('_speed') :: any
-  local maxVelocity: number = carEngine:GetAttribute('forwardMaxSpeed') :: any
-
-
-  if carData.TruncationPending or carData.TerminationPending then
-    return -20, totalProgress
-  end
-
-  return reward, totalProgress
--- Progress reward (main driver)
-progressReward = (currentProgress - lastProgress) * 1000
-
--- Reverse penalty (20x multiplier)
-if progressReward < 0 then
-    progressReward *= 20
+if truncationPending or terminationPending then
+  return -20 -- Always return -20 reward if the agent is being truncated or terminated
+else
+  return reward
 end
-
--- Speed bonus (exponential scaling)
-normalizedSpeed = clamp(velocity / maxVelocity, 0, 1)
-speedBonus = (exp(normalizedSpeed * 2) - 1) * 0.5  -- Max ~3.2
-
--- Final reward
-reward = progressReward + speedBonus
-
--- Termination penalty
-if terminated then reward = -10 end
 ```
 
-| Component | Typical Value | Purpose |
-|-----------|---------------|---------|
-| Progress | ~2/tick | Main learning signal |
-| Speed Bonus | 0-3.2 | Encourages high speed |
-| Reverse Penalty | -40 to -60 | Discourages backing up |
-| Termination | -10 | Crash/stuck penalty |
-
-Agent is also automatically being truncated if they do not make any track progress for a given amount of time (or the model gets removed from the map). Agent is being terminated by default if it hits any wall.
+Agent is automatically being truncated if they do not make any track progress for a given amount of time (or the model gets removed from the map). Agent is being terminated by default if it hits any wall.
 
 ### Multi-Environment Isolation
 
