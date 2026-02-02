@@ -36,6 +36,15 @@ class TrainingBridge:
     
     # --- Command Methods (send to Roblox) ---
     
+    def freeze(self, status: bool) -> None:
+        """
+        Request Roblox to freeze or unfreeze agents' physics.
+        
+        Args:
+            status: Whether the environment should be frozen or unfrozen.
+        """
+        self._bridge.send_command("FREEZE", "", {"status": status})
+    
     def spawn_agents(self, env_id: str, agents: list[str]) -> None:
         """
         Request Roblox to spawn agents for a virtual environment.
@@ -166,6 +175,18 @@ class ModelTrainer(ABC):
         2. Create/load the model
         3. Run model.learn()
         4. Save the model
+        """
+        pass
+    
+    @abstractmethod
+    def use(self) -> None:
+        """
+        Run inference loop (no training).
+        
+        This should:
+        1. Create the environment
+        2. Load the existing model
+        3. Run inference loop using model.predict()
         """
         pass
     

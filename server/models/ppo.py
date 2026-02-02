@@ -14,7 +14,7 @@ Hyperparameters:
 
 import os
 import numpy as np
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import gymnasium as gym
 from gymnasium import spaces
@@ -33,15 +33,18 @@ from .base import ModelTrainer, TrainingBridge
 class RobloxFreezeCallback(BaseCallback):
     """Callback to log rollout start/end events."""
     
-    def __init__(self, verbose=0):
+    def __init__(self, bridge: TrainingBridge, verbose=0):
         super().__init__(verbose)
+        self.bridge = bridge
         print("[Callback] Initializing RobloxFreezeCallback.")
 
     def _on_rollout_end(self) -> None:
         print("Rollout end (Freeze)")
+        self.bridge.freeze(True)
 
     def _on_rollout_start(self) -> None:
         print("Rollout start (Unfreeze)")
+        self.bridge.freeze(False)
         
     def _on_step(self) -> bool:
         return True
@@ -138,8 +141,6 @@ class PettingZooWSEnv(ParallelEnv):
                 terminations[agent] = False
                 truncations[agent] = False
 
-            infos[agent] = {}
-
         return observations, rewards, terminations, truncations, infos
 
 
@@ -159,11 +160,11 @@ class PPOTrainer(ModelTrainer):
         "batch_size": 64,
         "n_steps": 1024,
         "ent_coef": 0.01,
-        "net_arch": [256, 256],
+        "net_arch": [64, 64],
         "device": "cpu",
     }
     
-    def create_model(self, env: Any, tensorboard_log: str = None) -> PPO:
+    def create_model(self, env: Any, tensorboard_log: Optional[str] = None) -> PPO:
         """Create a new PPO model with configured hyperparameters."""
         hp = self.HYPERPARAMETERS
         policy_kwargs = dict(net_arch=hp["net_arch"])
@@ -233,20 +234,71 @@ class PPOTrainer(ModelTrainer):
             save_vecnormalize=True,
             name_prefix=self.model_id,
         )
-        freeze_callback = RobloxFreezeCallback()
+        freeze_callback = RobloxFreezeCallback(self.bridge)
 
         try:
-            model.learn(
-                total_timesteps=self.HYPERPARAMETERS["total_timesteps"],
-                callback=[checkpoint_callback, freeze_callback],
-                reset_num_timesteps=False,
-            )
-            
-            model.save(os.path.join(self.MODELS_DIR, self.model_id))
-            env.save(stats_path)
-            print(f"[{self.model_id}] Saved PPO model and normalization stats.")
+            while True:
+                model.learn(
+                    total_timesteps=self.HYPERPARAMETERS["total_timesteps"],
+                    callback=[checkpoint_callback, freeze_callback],
+                    reset_num_timesteps=False,
+                )
+                
+                model.save(os.path.join(self.MODELS_DIR, self.model_id))
+                env.save(stats_path)
+                print(f"[{self.model_id}] Saved PPO model and normalization stats.")
             
         except Exception as e:
             print(f"[{self.model_id}] Training Error: {e}")
+        finally:
+            env.close()
+
+    def use(self) -> None:
+        """Run PPO inference loop (no training)."""
+        print(f"[{self.model_id}] PPO Inference thread started.")
+        
+        model_path = os.path.join(self.MODELS_DIR, f"{self.model_id}.zip")
+        stats_path = os.path.join(self.MODELS_DIR, f"{self.model_id}_vecnormalize.pkl")
+        
+        if not os.path.exists(model_path):
+            print(f"[{self.model_id}] ERROR: Model not found at {model_path}")
+            print(f"[{self.model_id}] Please train a model first using --mode train")
+            return
+        
+        # Create environment
+        env = PettingZooWSEnv(
+            self.bridge,
+            num_agents=self.NUM_AGENTS,
+            state_dim=self.BASE_STATE_DIM,
+            action_dim=self.ACTION_DIM,
+            num_venvs=self.NUM_VENVS,
+        )
+        env = ss.frame_stack_v1(env, stack_size=self.STACK_SIZE)
+        env = ss.pettingzoo_env_to_vec_env_v1(env)
+        env = SB3VecEnvWrapper(env)
+        
+        # Load VecNormalize stats if available
+        if os.path.exists(stats_path):
+            print(f"[{self.model_id}] Loading normalization stats...")
+            env = VecNormalize.load(stats_path, env)
+            env.training = False  # Disable updating normalization stats
+            env.norm_reward = False  # Don't need reward normalization for inference
+        else:
+            env = VecNormalize(env, norm_obs=True, norm_reward=False, clip_obs=10.0, training=False)
+        
+        # Load model
+        print(f"[{self.model_id}] Loading PPO model from {model_path}...")
+        model = PPO.load(model_path, env=env, device=self.HYPERPARAMETERS["device"])
+        
+        print(f"[{self.model_id}] Starting inference loop...")
+        
+        try:
+            obs = env.reset()
+            while True:
+                action, _states = model.predict(obs, deterministic=True)
+                obs, rewards, dones, infos = env.step(action)
+                
+        except Exception as e:
+            print(f"[{self.model_id}] Inference Error: {e}")
         finally:
             env.close()

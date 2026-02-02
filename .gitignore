@@ -18,3 +18,8 @@ sourcemap.json
 
 server/sb3_logs
 server/saved_models
+
+# TODO: Fully implement
+todo
+
+*.pyc

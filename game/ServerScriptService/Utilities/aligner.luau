@@ -1,7 +1,7 @@
 -- https://github.com/stravant/roblox-resizealign/blob/main/src/main.server.lua
 -- MIT License
 --[[
-Copyright 2025 Mark Langen (@stravant)
+Copyright 2023 Mark Langen (@stravant)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the “Software”), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 
@@ -43,7 +43,7 @@ local function getFacePoints(face: Face): {Vector3}
 			cf:PointToWorldSpace((-Vector3.xAxis - Vector3.yAxis - Vector3.zAxis) * hsize),
 		}
 	else
-		local faceDir: Vector3 = Vector3.fromNormalId(face.Normal)
+		local faceDir: Vector3 = Vector3.FromNormalId(face.Normal)
 		local faceA: Vector3, faceB: Vector3 = otherNormals(faceDir)
 		faceDir, faceA, faceB = faceDir*hsize, faceA*hsize, faceB*hsize
 		--
@@ -95,7 +95,7 @@ local function getNormal(face: Face): Vector3
 		local cf: CFrame = face.Object.CFrame
 		return (cf.YVector * hsize.Z - cf.ZVector * hsize.Y).Unit
 	else
-		return face.Object.CFrame:VectorToWorldSpace(Vector3.fromNormalId(face.Normal))
+		return face.Object.CFrame:VectorToWorldSpace(Vector3.FromNormalId(face.Normal))
 	end
 end
 
@@ -104,7 +104,7 @@ local function getDimension(face: Face): Vector3
 		-- Can't subtract from a wedge face, only extend
 		return Vector3.zero
 	else
-		local dir = Vector3.fromNormalId(face.Normal)
+		local dir: Vector3 = Vector3.FromNormalId(face.Normal)
 		return Vector3.new(math.abs(dir.X), math.abs(dir.Y), math.abs(dir.Z))
 	end
 end
@@ -151,7 +151,7 @@ local function getBasis(face: Face): (Vector3, Vector3)
 		return face.Object.Position, getNormal(face)
 	else
 		local hsize: Vector3 = face.Object.Size / 2
-		local faceDir: Vector3 = Vector3.fromNormalId(face.Normal)
+		local faceDir: Vector3 = Vector3.FromNormalId(face.Normal)
 		local faceNormal: Vector3 = face.Object.CFrame:VectorToWorldSpace(faceDir)
 		local facePoint: Vector3 = face.Object.CFrame:PointToWorldSpace(faceDir * hsize)
 		return facePoint, faceNormal
@@ -199,9 +199,9 @@ function resizePart(face: Face, delta: number): ()
 		part.TopSurface = Enum.SurfaceType.Smooth
 		part.BottomSurface = Enum.SurfaceType.Smooth
 		part.Parent = face.Object.Parent
-		part.Name = face.Object.Name.."_Extended"
+		part.Name = face.Object.Name .. "_Extended"
 	else
-		local axis: Vector3 = Vector3.fromNormalId(face.Normal)
+		local axis: Vector3 = Vector3.FromNormalId(face.Normal)
 		face.Object.Size += Vector3.new(math.abs(axis.X), math.abs(axis.Y), math.abs(axis.Z)) * delta
 		face.Object.CFrame *= CFrame.new(axis * (delta / 2))
 	end
@@ -211,6 +211,7 @@ end
 --IMPLEMENTATION--
 ------------------
 
+--[[
 function otherNormalIds(normalId: Enum.NormalId): (Enum.NormalId, Enum.NormalId, Enum.NormalId, Enum.NormalId)
 	if normalId == Enum.NormalId.Top or normalId == Enum.NormalId.Bottom then
 		return Enum.NormalId.Right, Enum.NormalId.Left, Enum.NormalId.Back, Enum.NormalId.Front
@@ -220,7 +221,6 @@ function otherNormalIds(normalId: Enum.NormalId): (Enum.NormalId, Enum.NormalId,
 		return Enum.NormalId.Top, Enum.NormalId.Bottom, Enum.NormalId.Right, Enum.NormalId.Left
 	end
 end
---[[
 function getFaceSize(part: BasePart, normalId: Enum.NormalId): number
 	local size: Vector3 = part.Size
 	local vec: Vector3 = Vector3.fromNormalId(normalId)
@@ -297,28 +297,28 @@ local function isCylinder(part: BasePart): boolean
 end
 
 
-local function fillJoint(faceA: Face, faceB: Face, fillPoint, fillAxis: Vector3, pointsA, pointsB, offsetA, offsetB): ()
+local function fillJoint(faceA: Face, faceB: Face, fillPoint: Vector3, fillAxis: Vector3, pointsA: { Vector3 }, pointsB: { Vector3 }, offsetA: Vector3, offsetB: Vector3): ()
 	local maxProj: number = -math.huge
 	local minProj: number = math.huge
 	local maxRadius: number = -math.huge
-	for _, point in pointsA do
-		local modPoint = point + offsetA
-		local proj = (modPoint - fillPoint):Dot(fillAxis)
+	for _, point: Vector3 in pointsA do
+		local modPoint: Vector3 = point + offsetA
+		local proj: number = (modPoint - fillPoint):Dot(fillAxis)
 		maxProj = math.max(maxProj, proj)
 		minProj = math.min(minProj, proj)
 		
 		-- Take the radius from the first face selected
-		local toAxis = (modPoint - (fillPoint + fillAxis * proj)).Magnitude
+		local toAxis: number = (modPoint - (fillPoint + fillAxis * proj)).Magnitude
 		maxRadius = math.max(maxRadius, toAxis)
 	end
-	for _, point in pointsB do
-		local modPoint = point + offsetB
-		local proj = (modPoint - fillPoint):Dot(fillAxis)
+	for _, point: Vector3 in pointsB do
+		local modPoint: Vector3 = point + offsetB
+		local proj: number = (modPoint - fillPoint):Dot(fillAxis)
 		maxProj = math.max(maxProj, proj)
 		minProj = math.min(minProj, proj)
 	end
 	--
-	local centerPoint = fillPoint + fillAxis * (0.5 * (minProj + maxProj))
+	local centerPoint: Vector3 = fillPoint + fillAxis * (0.5 * (minProj + maxProj))
 	local length: number = (maxProj - minProj)
 	local radius: number = maxRadius
 	--
