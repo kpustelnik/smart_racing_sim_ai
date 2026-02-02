@@ -493,6 +493,7 @@ Uses A*-like pathfinding with constraint satisfaction:
 | `minimumDistance` | 130 | Min distance between points |
 | `maxDistance` | 500 | Max edge length |
 | `pathDistance` | 100 | Min distance of node from existing path |
+| `PrebuiltStructureMargin` | 30 | Min distance of path to pre-built structures |
 
 Constraints:
 - No self-intersecting paths
