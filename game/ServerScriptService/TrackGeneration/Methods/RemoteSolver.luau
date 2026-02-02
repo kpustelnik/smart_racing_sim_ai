@@ -1,4 +1,4 @@
-
+--!strict
 
 local Workspace = game:GetService("Workspace")
 local CollectionService = game:GetService("CollectionService")

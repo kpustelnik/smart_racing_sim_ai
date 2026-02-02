@@ -15,7 +15,6 @@ Arguments:
     --port, -p          Server port (default: 8000)
     --host              Server host (default: 0.0.0.0)
 """
-# TODO
 
 import argparse
 import asyncio
@@ -28,12 +27,10 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from models import get_trainer, list_available_models, TrainingBridge
 import threading
 
-
 # --- CONFIGURATION ---
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 8000
 NUM_AGENTS = 3
-
 
 # --- DATA BRIDGE (internal implementation) ---
 class DataBridge:
@@ -134,12 +131,18 @@ def create_app(model_type: str, mode: str = "train") -> FastAPI:
 
         async def sender_task():
             """Reads commands from Bridge and sends to Roblox."""
+            last_sent: float = asyncio.get_event_loop().time()
             while True:
                 cmd = bridge.get_outgoing_command()
+                time: float = asyncio.get_event_loop().time()
                 if cmd:
+                    last_sent = time
                     await websocket.send_json(cmd)
                 else:
                     await asyncio.sleep(0.01)
+                if time - last_sent >= 5:
+                    last_sent = time
+                    await websocket.send_json({ "command": "PING" })
 
         async def receiver_task():
             """Reads JSON from Roblox and routes to Bridge queues."""

@@ -1,3 +1,5 @@
+--!strict
+
 local Workspace = game:GetService("Workspace")
 local CollectionService = game:GetService("CollectionService")
 local Map = Workspace:WaitForChild("Map")

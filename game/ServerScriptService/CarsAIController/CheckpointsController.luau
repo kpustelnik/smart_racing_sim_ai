@@ -1,3 +1,4 @@
+--!strict
 local Utilities = script.Parent.Parent:WaitForChild('Utilities')
 local RayClosestPoint = require(Utilities:WaitForChild('RayClosestPoint'))
 

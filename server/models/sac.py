@@ -13,13 +13,13 @@ Hyperparameters:
 
 import os
 import numpy as np
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import gymnasium as gym
 from gymnasium import spaces
 from stable_baselines3 import SAC
 from stable_baselines3.common.vec_env import VecNormalize
-from stable_baselines3.common.callbacks import CheckpointCallback
+from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
 
 from pettingzoo import ParallelEnv
 import supersuit as ss
@@ -27,6 +27,26 @@ from supersuit.vector.sb3_vector_wrapper import SB3VecEnvWrapper
 import uuid
 
 from .base import ModelTrainer, TrainingBridge
+
+
+class RobloxFreezeCallback(BaseCallback):
+    """Callback to freeze/unfreeze Roblox simulation during rollout collection."""
+    
+    def __init__(self, bridge: TrainingBridge, verbose=0):
+        super().__init__(verbose)
+        self.bridge = bridge
+        print("[Callback] Initializing RobloxFreezeCallback.")
+
+    def _on_rollout_end(self) -> None:
+        print("Rollout end (Freeze)")
+        self.bridge.freeze(True)
+
+    def _on_rollout_start(self) -> None:
+        print("Rollout start (Unfreeze)")
+        self.bridge.freeze(False)
+        
+    def _on_step(self) -> bool:
+        return True
 
 
 class PettingZooWSEnv(ParallelEnv):
@@ -72,6 +92,7 @@ class PettingZooWSEnv(ParallelEnv):
     def close(self):
         for venv_id in self.venvs_id:
             self.data_bridge.close_environment(venv_id)
+        self.data_bridge.close_all()
 
     def reset(self, seed=None, options=None):
         self.data_bridge.clear_observations()
@@ -118,7 +139,6 @@ class PettingZooWSEnv(ParallelEnv):
                 rewards[agent] = 0.0
                 terminations[agent] = False
                 truncations[agent] = False
-
             infos[agent] = {}
 
         return observations, rewards, terminations, truncations, infos
@@ -144,7 +164,7 @@ class SACTrainer(ModelTrainer):
         "device": "cpu",
     }
     
-    def create_model(self, env: Any, tensorboard_log: str = None) -> SAC:
+    def create_model(self, env: Any, tensorboard_log: Optional[str] = None) -> SAC:
         """Create a new SAC model with configured hyperparameters."""
         hp = self.HYPERPARAMETERS
         policy_kwargs = dict(net_arch=hp["net_arch"])
@@ -214,18 +234,18 @@ class SACTrainer(ModelTrainer):
             save_vecnormalize=True,
             name_prefix=self.model_id,
         )
+        freeze_callback = RobloxFreezeCallback(self.bridge)
 
         try:
             model.learn(
                 total_timesteps=self.HYPERPARAMETERS["total_timesteps"],
-                callback=checkpoint_callback,
+                callback=[checkpoint_callback, freeze_callback],
                 reset_num_timesteps=False,
             )
             
             model.save(os.path.join(self.MODELS_DIR, self.model_id))
             env.save(stats_path)
             print(f"[{self.model_id}] Saved SAC model and normalization stats.")
-            
         except Exception as e:
             print(f"[{self.model_id}] Training Error: {e}")
         finally:
@@ -275,7 +295,6 @@ class SACTrainer(ModelTrainer):
             while True:
                 action, _states = model.predict(obs, deterministic=True)
                 obs, rewards, dones, infos = env.step(action)
-                
         except Exception as e:
             print(f"[{self.model_id}] Inference Error: {e}")
         finally:

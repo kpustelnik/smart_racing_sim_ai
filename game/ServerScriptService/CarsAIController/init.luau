@@ -40,4 +40,7 @@ return function (wsUrl: string, modelId: string, carModel: string, enableEnvColl
   pcall(function(): () websocketClient:Close() end) -- Try to close gracefully
   warn(`WebSocket for model {modelId} closed.`)
   CurrentCmdHandler:Cleanup()
+  msgReceivedConn:Disconnect()
+  msgReceivedConn = nil
+  handleFunc = nil
 end
