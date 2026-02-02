@@ -1,3 +1,4 @@
+--!strict
 local RunService = game:GetService('RunService')
 local HttpService = game:GetService('HttpService')
 local PhysicsService = game:GetService('PhysicsService')
@@ -118,7 +119,7 @@ end
 
 -- Resets selected agents in the environment
 type ResetData = { agents: { string } }
-CmdHandler['RESET'] = function (self: CmdHandler, data: ResetData, envId: string?): ()
+CmdHandler['RESET_AGENTS'] = function (self: CmdHandler, data: ResetData, envId: string?): ()
   if envId == nil then return end
   local agents: { string } = data.agents
   return CmdHandler['SPAWN_AGENTS'](self, { agents = agents } :: SpawnAgentsData, envId)
@@ -345,7 +346,7 @@ CmdHandler.Setup = function (self: CmdHandler): ()
         local wasTerminationPending: boolean = CarData.TerminationPending
         local wasTruncationPending: boolean = CarData.TruncationPending
         if wasTerminationPending or wasTruncationPending then -- Respawn the car due to termination and/or truncation (so that we providfe fresh data)
-          CmdHandler['RESET'](self, { agents = { AgentId } } :: ResetData, EnvId)
+          CmdHandler['RESET_AGENTS'](self, { agents = { AgentId } } :: ResetData, EnvId)
           CarData = CarsController.GetCarData(AgentId) -- Retrieve fresh data
           if CarData == nil then continue end
         end

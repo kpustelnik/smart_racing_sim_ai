@@ -8,8 +8,6 @@ This module provides:
 
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional
-import numpy as np
-
 
 class TrainingBridge:
     """
@@ -63,7 +61,17 @@ class TrainingBridge:
             env_id: Unique identifier for the virtual environment
             agents: List of agent IDs to reset
         """
-        self._bridge.send_command("RESET", env_id, {"agents": agents})
+        self._bridge.send_command("RESET_AGENTS", env_id, {"agents": agents})
+    
+    def remove_agents(self, env_id: str, agents: list[str]) -> None:
+        """
+        Request Roblox to remove agents
+        
+        Args:
+            env_id: Unique identifier for the virtual environment
+            agents: List of agent IDs to remove
+        """
+        self._bridge.send_command("REMOVE_AGENTS", env_id, {"agents": agents})
     
     def send_actions(self, env_id: str, actions: Dict[str, list[float]]) -> None:
         """
@@ -83,6 +91,18 @@ class TrainingBridge:
             env_id: Unique identifier for the virtual environment to close
         """
         self._bridge.send_command("CLOSE", env_id)
+    
+    def close_all(self) -> None:
+        """
+        Request Roblox to close/cleanup all virtual environments.
+        """
+        self._bridge.send_command("CLOSE_ALL", '')
+    
+    def update_collisions(self, status: bool) -> None:
+        """
+        Request Roblox to update collisions between agents.
+        """
+        self._bridge.send_command("UPDATE_COLLISIONS", '', {"enable_collisions": status})
     
     # --- Observation Methods (receive from Roblox) ---
     
@@ -133,10 +153,10 @@ class ModelTrainer(ABC):
     VELOCITY_STATE = 1
     PREV_ACTIONS = 0
     BASE_STATE_DIM = RAYCASTS + NITRO_FUEL_STATE + PREV_ACTIONS + VELOCITY_STATE  # 12
-    STACK_SIZE = 4
-    ACTION_DIM = 3
-    NUM_AGENTS = 5
-    NUM_VENVS = 4
+    STACK_SIZE = 4 # How many actions to the past should be reflected
+    ACTION_DIM = 3 # Steer, Throttle, Nitro
+    NUM_AGENTS = 5 # How many agents per environment
+    NUM_VENVS = 4 # How many parralel environments
     
     MODELS_DIR = "saved_models"
     LOGS_DIR = "sb3_logs"

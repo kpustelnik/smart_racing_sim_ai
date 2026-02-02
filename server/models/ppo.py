@@ -94,6 +94,7 @@ class PettingZooWSEnv(ParallelEnv):
     def close(self):
         for venv_id in self.venvs_id:
             self.data_bridge.close_environment(venv_id)
+        self.data_bridge.close_all()
 
     def reset(self, seed=None, options=None):
         self.data_bridge.clear_observations()
@@ -140,6 +141,7 @@ class PettingZooWSEnv(ParallelEnv):
                 rewards[agent] = 0.0
                 terminations[agent] = False
                 truncations[agent] = False
+            infos[agent] = {}
 
         return observations, rewards, terminations, truncations, infos
 
@@ -247,7 +249,6 @@ class PPOTrainer(ModelTrainer):
                 model.save(os.path.join(self.MODELS_DIR, self.model_id))
                 env.save(stats_path)
                 print(f"[{self.model_id}] Saved PPO model and normalization stats.")
-            
         except Exception as e:
             print(f"[{self.model_id}] Training Error: {e}")
         finally:
@@ -291,13 +292,11 @@ class PPOTrainer(ModelTrainer):
         model = PPO.load(model_path, env=env, device=self.HYPERPARAMETERS["device"])
         
         print(f"[{self.model_id}] Starting inference loop...")
-        
         try:
             obs = env.reset()
             while True:
                 action, _states = model.predict(obs, deterministic=True)
                 obs, rewards, dones, infos = env.step(action)
-                
         except Exception as e:
             print(f"[{self.model_id}] Inference Error: {e}")
         finally:
