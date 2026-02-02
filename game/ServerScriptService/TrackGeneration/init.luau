@@ -60,8 +60,96 @@ PointsFolder.Parent = workspace
 local random = Random.new()
 local Points: { Point } = {}
 
+
+--[[
+	Micro-optimized code for computing a local space and the global space
+	bounding box for a set of parts and attachments as fast as possible.
+]]
+local function computeTwoBoundingBoxes(basisCFrame1: CFrame, allParts: { BasePart })
+	local inverseBasis1: CFrame = basisCFrame1:Inverse()
+	local xmin1: number, xmax1: number = math.huge, -math.huge
+	local ymin1: number, ymax1: number = math.huge, -math.huge
+	local zmin1: number, zmax1: number = math.huge, -math.huge
+	local xmin2: number, xmax2: number = math.huge, -math.huge
+	local ymin2: number, ymax2: number = math.huge, -math.huge
+	local zmin2: number, zmax2: number = math.huge, -math.huge
+
+	for _, part: BasePart in ipairs(allParts) do
+    local cframe = part.CFrame
+    local csize: Vector3 = part.Size
+    local sx: number, sy: number, sz: number = csize.X, csize.Y, csize.Z
+
+    -- Calculation for bounding box in the space of basisCFrame1
+    local localCFrame1: CFrame = inverseBasis1 * cframe -- put cframe in our local basis
+    local _, _, _,
+      t00: number, t01: number, t02: number,
+      t10: number, t11: number, t12: number,
+      t20: number, t21: number, t22: number = localCFrame1:components()
+    local hw1: number = 0.5 * (math.abs(sx * t00) + math.abs(sy * t01) + math.abs(sz * t02))
+    local hh1: number = 0.5 * (math.abs(sx * t10) + math.abs(sy * t11) + math.abs(sz * t12))
+    local hd1: number = 0.5 * (math.abs(sx * t20) + math.abs(sy * t21) + math.abs(sz * t22))
+    local x1: number, y1: number, z1: number = localCFrame1.X, localCFrame1.Y, localCFrame1.Z
+    xmin1 = math.min(xmin1, x1 - hw1)
+    xmax1 = math.max(xmax1, x1 + hw1)
+    ymin1 = math.min(ymin1, y1 - hh1)
+    ymax1 = math.max(ymax1, y1 + hh1)
+    zmin1 = math.min(zmin1, z1 - hd1)
+    zmax1 = math.max(zmax1, z1 + hd1)
+
+    -- Calculation for the bounding box in the global coordinate space
+    _, _, _,
+      t00, t01, t02,
+      t10, t11, t12,
+      t20, t21, t22 = cframe:components()
+    local hw2: number = 0.5 * (math.abs(sx * t00) + math.abs(sy * t01) + math.abs(sz * t02))
+    local hh2: number = 0.5 * (math.abs(sx * t10) + math.abs(sy * t11) + math.abs(sz * t12))
+    local hd2: number = 0.5 * (math.abs(sx * t20) + math.abs(sy * t21) + math.abs(sz * t22))
+    local x2: number, y2: number, z2: number = cframe.X, cframe.Y, cframe.Z
+    xmin2 = math.min(xmin2, x2 - hw2)
+    xmax2 = math.max(xmax2, x2 + hw2)
+    ymin2 = math.min(ymin2, y2 - hh2)
+    ymax2 = math.max(ymax2, y2 + hh2)
+    zmin2 = math.min(zmin2, z2 - hd2)
+    zmax2 = math.max(zmax2, z2 + hd2)
+	end
+
+	local localBoundingBoxOffset: Vector3 = Vector3.new(
+		0.5 * (xmin1 + xmax1),
+		0.5 * (ymin1 + ymax1),
+		0.5 * (zmin1 + zmax1)
+	)
+	local localBoundingBoxSize: Vector3 = Vector3.new(
+		xmax1 - xmin1,
+		ymax1 - ymin1,
+		zmax1 - zmin1
+	)
+
+	return localBoundingBoxOffset, localBoundingBoxSize
+end
+
 -- Add prebuilt objects
+local CollidersFolder: Folder = Instance.new('Folder')
+CollidersFolder.Name = 'PrebuiltColliders'
+CollidersFolder.Parent = Map
+local PrebuiltStructureMargin = 30
 for _, object in ipairs(PrebuiltObjects:GetChildren()) do
+  local objParts: { BasePart } = {}
+  for _, part in ipairs(object:GetDescendants()) do
+    if part:IsA('BasePart') then table.insert(objParts, part) end
+  end
+  local cf: CFrame = object:GetPivot()
+  local boundingBoxOffset: CFrame, boundingBoxSize: Vector3 = computeTwoBoundingBoxes(object:GetPivot(), objParts)
+  boundingBoxSize = Vector3.new(boundingBoxSize.X, 1000, boundingBoxSize.Z)
+
+  local ColliderPart: Part = Instance.new('Part')
+  ColliderPart.Name = object.Name .. '_Collider'
+  ColliderPart.Size = boundingBoxSize + Vector3.new(PrebuiltStructureMargin * 2, 0, PrebuiltStructureMargin * 2)
+  ColliderPart.Anchored = true
+  ColliderPart.CFrame = cf * CFrame.new(boundingBoxOffset)
+  ColliderPart.Transparency = 0.5
+  ColliderPart.CanCollide = true
+  ColliderPart.Parent = CollidersFolder
+
   local objectPoints = {}
   local objectNodes: Instance? = object:FindFirstChild('Nodes')
   if objectNodes ~= nil then
@@ -74,6 +162,7 @@ for _, object in ipairs(PrebuiltObjects:GetChildren()) do
           Special = if SpecialAttribute ~= nil and typeof(SpecialAttribute) == 'string' then SpecialAttribute else nil,
           Direction = node.CFrame.LookVector,
           Part = node,
+          Collider = ColliderPart,
           Bonus = -100000
         }
         table.insert(Points, Point)
@@ -143,24 +232,25 @@ end
 local pathFolder = Instance.new("Folder")
 pathFolder.Name = 'Path'
 pathFolder.Parent = Workspace
+local debugParts: boolean = true
 local genPath = function (path)
   pathFolder:ClearAllChildren()
-  --[[
-  for i, curPoint: Point in ipairs(path) do
-    local nextPoint: Point? = if i ~= #path then path[i + 1] else nil
-    if curPoint.Next == nextPoint then continue end
-    if nextPoint ~= nil then
-      local PathPart: Part = Instance.new("Part")
-      PathPart.Color = Color3.new(0.5, 0.5, 0.5)
-      PathPart.CFrame = CFrame.lookAt((nextPoint.Position + curPoint.Position) / 2, nextPoint.Position, Vector3.new(0, 1, 0))
-      PathPart.Size = Vector3.new(2, 1, (nextPoint.Position - curPoint.Position).Magnitude)
-      PathPart.Anchored = true
-      PathPart.Parent = pathFolder
-      PathPart.Color = Color3.new(1,1,0)
-      PathPart.CanCollide = false
+  if debugParts then
+    for i, curPoint: Point in ipairs(path) do
+      local nextPoint: Point? = if i ~= #path then path[i + 1] else nil
+      if curPoint.Next == nextPoint then continue end
+      if nextPoint ~= nil then
+        local PathPart: Part = Instance.new("Part")
+        PathPart.Color = Color3.new(0.5, 0.5, 0.5)
+        PathPart.CFrame = CFrame.lookAt((nextPoint.Position + curPoint.Position) / 2, nextPoint.Position, Vector3.new(0, 1, 0))
+        PathPart.Size = Vector3.new(2, 1, (nextPoint.Position - curPoint.Position).Magnitude)
+        PathPart.Anchored = true
+        PathPart.Parent = pathFolder
+        PathPart.Color = Color3.new(1,1,0)
+        PathPart.CanCollide = false
+      end
     end
   end
-  ]]
 end
 
 queue:put({ Start }, 0) -- Add the starting point to the queue
@@ -214,8 +304,24 @@ while not queue:empty() do
     if math.abs(normalizedAngle) >= 2/3 then continue end
     if newPoint.Direction ~= nil and math.abs(angleBetween(curDirection, -newPoint.Direction) / math.pi) > 1/4 then continue end
     if lastPoint.Direction ~= nil and math.abs(angleBetween(curDirection, lastPoint.Direction) / math.pi) > 1/4 then continue end
+    
+    -- Check if the path does not go through a prebuilt structure (unless the starting node or the ending node belongs to the structure)
+    local currentColliders: { BasePart } = {}
 
-    -- Check if the track does not directly through an object (should improve!!!)
+    for _, collider in ipairs(CollidersFolder:GetChildren()) do
+      if not collider:IsA('BasePart') then continue end
+      if lastPoint.Collider == collider or newPoint.Collider == collider then continue end
+      table.insert(currentColliders, collider)
+    end
+
+    local params = RaycastParams.new()
+    params.FilterDescendantsInstances = currentColliders
+    params.FilterType = Enum.RaycastFilterType.Include
+    params.IgnoreWater = true
+    local collideRaycast = Workspace:Raycast(lastPoint.Position, newPoint.Position - lastPoint.Position, params)
+    if collideRaycast ~= nil then continue end
+
+    -- Check if the track does not directly through an object
     local raycast = Workspace:Raycast(lastPoint.Position, newPoint.Position - lastPoint.Position)
     if raycast ~= nil then
       if raycast.Instance:IsDescendantOf(PrebuiltObjects) then
@@ -269,10 +375,10 @@ while not queue:empty() do
   end
 end
 
+CollidersFolder:Destroy()
+pathFolder:ClearAllChildren()
 print("Finished")
 if finalPath ~= nil then
-  genPath(finalPath)
-
   local Finalizer = require(script:WaitForChild("Finalizers"):WaitForChild("Main"))
   Finalizer(finalPath, pathFolder)
 else

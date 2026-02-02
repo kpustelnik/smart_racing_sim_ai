@@ -16,10 +16,12 @@ return function (wsUrl: string, modelId: string, carModel: string, enableEnvColl
   end
   
   local startTime: number = tick()
+  local lastRefreshTime: number = startTime
   local lastMsgTime: number = startTime
   websocketClient.Opened:Connect(function (): () print(`WebSocket connected for model {modelId}`) end)
   websocketClient.Error:Connect(function(...): () warn("Websocket error encountered:", ...) end)
-  websocketClient.MessageReceived:Connect(function (msg: string): ()
+  local msgReceivedConn: RBXScriptConnection?
+  local handleFunc = function (msg: string): ()
     lastMsgTime = tick()
     local jsonSuccess: boolean, jsonResult: string | BackendMessage = pcall(function (): BackendMessage return HttpService:JSONDecode(msg) end)
     if not jsonSuccess or typeof(jsonResult) == 'string' then
@@ -29,10 +31,18 @@ return function (wsUrl: string, modelId: string, carModel: string, enableEnvColl
 
     local decodedMsg: BackendMessage = jsonResult
     CurrentCmdHandler:Handle(decodedMsg)
-  end)
+  end
+  msgReceivedConn = websocketClient.MessageReceived:Connect(handleFunc)
 
   CurrentCmdHandler:Setup() -- Start simulating
-  while websocketClient.ConnectionState ~= Enum.WebStreamClientState.Closed and (tick() - lastMsgTime) <= TimeoutSeconds do task.wait(1) end
+  while websocketClient.ConnectionState ~= Enum.WebStreamClientState.Closed and (tick() - lastMsgTime) <= TimeoutSeconds do
+    task.wait(1)
+    if (tick() - lastRefreshTime) >= 60 then
+      msgReceivedConn:Disconnect()
+      msgReceivedConn = websocketClient.MessageReceived:Connect(handleFunc)
+      lastRefreshTime = tick()
+    end
+  end
   pcall(function(): () websocketClient:Close() end) -- Try to close gracefully
   warn(`WebSocket for model {modelId} closed.`)
   CurrentCmdHandler:Cleanup()

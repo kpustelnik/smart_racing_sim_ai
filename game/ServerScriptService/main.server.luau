@@ -1,8 +1,8 @@
 --!strict
-local modelId: string = 'telsa_nospecialf'
-local carModel: string = 'Telsa'
+local modelId: string = 'car_new'
+local carModel: string = 'Car'
 local wsUrl: string = `ws://localhost:8000/ws/{modelId}`
-local enableCollisions: boolean = false
+local enableCollisions: boolean = true
 
 local TrackGeneration = require(script.Parent:WaitForChild('TrackGeneration'))
 

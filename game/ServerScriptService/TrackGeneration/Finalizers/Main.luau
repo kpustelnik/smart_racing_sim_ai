@@ -3,89 +3,14 @@
 local Types = require(script.Parent.Parent:WaitForChild("types"))
 
 local AssetService = game:GetService('AssetService')
-local ServerStorage = game:GetService('ServerStorage')
-local ServerScriptService = game:GetService("ServerScriptService")
 
 local Workspace = game:GetService('Workspace')
 local Terrain = Workspace:WaitForChild('Terrain')
-
-local TrackBase = ServerStorage:WaitForChild('TrackBase')
-local axis: Vector3 = Vector3.new(0, 0, 1)
-
-local Redupe = ServerScriptService:WaitForChild("Utilities"):WaitForChild("redupe")
-local createGhostPreview = require(Redupe:WaitForChild("createGhostPreview"))
-local bendPlacement = require(Redupe:WaitForChild("bendPlacement"))
-local resizeAlignPairs = require(Redupe:WaitForChild("resizeAlignPairs"))
 
 local Checkpoints = Instance.new("Folder")
 Checkpoints.Name = "Checkpoints"
 Checkpoints.Parent = Workspace
 
---[[
-	Micro-optimized code for computing a local space and the global space
-	bounding box for a set of parts and attachments as fast as possible.
-]]
-local function computeTwoBoundingBoxes(basisCFrame1: CFrame, allParts: { BasePart })
-	local inverseBasis1: CFrame = basisCFrame1:Inverse()
-	local xmin1: number, xmax1: number = math.huge, -math.huge
-	local ymin1: number, ymax1: number = math.huge, -math.huge
-	local zmin1: number, zmax1: number = math.huge, -math.huge
-	local xmin2: number, xmax2: number = math.huge, -math.huge
-	local ymin2: number, ymax2: number = math.huge, -math.huge
-	local zmin2: number, zmax2: number = math.huge, -math.huge
-
-	for _, part: BasePart in ipairs(allParts) do
-    local cframe = part.CFrame
-    local csize: Vector3 = part.Size
-    local sx: number, sy: number, sz: number = csize.X, csize.Y, csize.Z
-
-    -- Calculation for bounding box in the space of basisCFrame1
-    local localCFrame1: CFrame = inverseBasis1 * cframe -- put cframe in our local basis
-    local _, _, _,
-      t00: number, t01: number, t02: number,
-      t10: number, t11: number, t12: number,
-      t20: number, t21: number, t22: number = localCFrame1:components()
-    local hw1: number = 0.5 * (math.abs(sx * t00) + math.abs(sy * t01) + math.abs(sz * t02))
-    local hh1: number = 0.5 * (math.abs(sx * t10) + math.abs(sy * t11) + math.abs(sz * t12))
-    local hd1: number = 0.5 * (math.abs(sx * t20) + math.abs(sy * t21) + math.abs(sz * t22))
-    local x1: number, y1: number, z1: number = localCFrame1.X, localCFrame1.Y, localCFrame1.Z
-    xmin1 = math.min(xmin1, x1 - hw1)
-    xmax1 = math.max(xmax1, x1 + hw1)
-    ymin1 = math.min(ymin1, y1 - hh1)
-    ymax1 = math.max(ymax1, y1 + hh1)
-    zmin1 = math.min(zmin1, z1 - hd1)
-    zmax1 = math.max(zmax1, z1 + hd1)
-
-    -- Calculation for the bounding box in the global coordinate space
-    _, _, _,
-      t00, t01, t02,
-      t10, t11, t12,
-      t20, t21, t22 = cframe:components()
-    local hw2: number = 0.5 * (math.abs(sx * t00) + math.abs(sy * t01) + math.abs(sz * t02))
-    local hh2: number = 0.5 * (math.abs(sx * t10) + math.abs(sy * t11) + math.abs(sz * t12))
-    local hd2: number = 0.5 * (math.abs(sx * t20) + math.abs(sy * t21) + math.abs(sz * t22))
-    local x2: number, y2: number, z2: number = cframe.X, cframe.Y, cframe.Z
-    xmin2 = math.min(xmin2, x2 - hw2)
-    xmax2 = math.max(xmax2, x2 + hw2)
-    ymin2 = math.min(ymin2, y2 - hh2)
-    ymax2 = math.max(ymax2, y2 + hh2)
-    zmin2 = math.min(zmin2, z2 - hd2)
-    zmax2 = math.max(zmax2, z2 + hd2)
-	end
-
-	local localBoundingBoxOffset: Vector3 = Vector3.new(
-		0.5 * (xmin1 + xmax1),
-		0.5 * (ymin1 + ymax1),
-		0.5 * (zmin1 + zmax1)
-	)
-	local localBoundingBoxSize: Vector3 = Vector3.new(
-		xmax1 - xmin1,
-		ymax1 - ymin1,
-		zmax1 - zmin1
-	)
-
-	return localBoundingBoxOffset, localBoundingBoxSize
-end
 
 local function catmullRom(p0: Vector3, p1: Vector3, p2: Vector3, p3: Vector3, t: number)
     local t2: number = t * t
@@ -120,12 +45,9 @@ return function (path: { Types.Point }, pathFolder: Folder): ()
   end
 
   -- Path generation
-  local prev = nil
-  local prevBasis = nil
   for i, curPoint: Types.Point in ipairs(path) do
     local nextPoint: Types.Point? = if i ~= #path then path[i + 1] else nil
     if curPoint.Next == nextPoint then -- Check if it's a skip connection (via structure)
-      prev = nil
       continue
     end
     if nextPoint ~= nil then
@@ -144,13 +66,6 @@ return function (path: { Types.Point }, pathFolder: Folder): ()
         endCF = CFrame.lookAt(nextPoint.Position, nextPoint.Position - nextPoint.Direction, Vector3.new(0, 1, 0))
         createCheckpoint(endCF)
       end
-  
-      -- Compute the track base properties
-      local placements: { bendPlacement.Placement } = {} :: { bendPlacement.Placement }
-      local reversePlacements: { bendPlacement.Placement } = {} :: { bendPlacement.Placement }
-
-      local deltaSize: Vector3 = Vector3.new() --[[ TODO: May adjust the end size ]]
-      -- TODO: End Delta position (offset from the main axis may also be put here)
 
       -- Probe the curve points
       local probedPoints: { Vector3 } = {}
@@ -158,255 +73,247 @@ return function (path: { Types.Point }, pathFolder: Folder): ()
       local t1 = #probedPoints
 
       -- Probe few extra points
-      for t = 1.001, 1.01 do table.insert(probedPoints, catmullRom(prv, a, b, nxt, t)) end
+      for t = 1.001, 1.01, 0.001 do table.insert(probedPoints, catmullRom(prv, a, b, nxt, t)) end
 
       local localBoundingBoxSize: Vector3 = Vector3.new(49, 20, 1)
       local localBoundingBoxOffset: Vector3 = Vector3.new(0, 10, 0)
 
-      local ct: number = 0
-      local rct: number = t1 + 1
-      local runningPositionNow: CFrame = startCF
-      local reverseRunningPositionNow: CFrame = endCF
-      while true do
-        -- Find the start point
-        local lastPart = Instance.new('Part')
-        lastPart.Size = localBoundingBoxSize
-        lastPart.Anchored = true
-        lastPart.CFrame = runningPositionNow * CFrame.new(localBoundingBoxOffset)
-        lastPart.Transparency = 0.5
-        lastPart.Parent = Workspace
+      local XYZtoXZ = function (v: Vector3, y: number): Vector3 return Vector3.new(v.X, y, v.Z) end
+      local prev_lPoint: CFrame?, rev_prev_lPoint: CFrame? = nil, nil
+      local prev_rPoint: CFrame?, rev_prev_rPoint: CFrame? = nil, nil
+      local all_lPoints: { Vector3? }, rev_all_lPoints: { Vector3? } = {}, {}
+      local all_rPoints: { Vector3? }, rev_all_rPoints: { Vector3? } = {}, {}
+      local all_cfs: { CFrame }, rev_all_cfs: { CFrame } = {}, {}
+      local step = 4
+      for ct = 1, t1, step do
+        local rct = t1 - ct + 1
+        -- Forward
+        if ct >= rct + step then break end
 
-        local cf: CFrame? = nil
-        while true do 
-          ct += 1
-          if ct >= rct then break end -- Reached the boundary
-          cf = CFrame.lookAt(probedPoints[ct], probedPoints[math.clamp(ct + 1, 1, #probedPoints)])
-          
-          local overlapParams = OverlapParams.new()
-          overlapParams.FilterType = Enum.RaycastFilterType.Include
-          overlapParams.FilterDescendantsInstances = { lastPart }
-          overlapParams.MaxParts = 1
-
-          local parts = Workspace:GetPartBoundsInBox(cf * CFrame.new(localBoundingBoxOffset), localBoundingBoxSize, overlapParams)
-          if #parts == 0 then break end
-        end
-        task.wait() 
-        lastPart:Destroy()
-        if ct >= rct then break end -- Reached the boundary
-
-        -- Calculate the initial placement data
-        local copySize: Vector3 = localBoundingBoxSize + (deltaSize * ct / t1)
-        local prevSize: Vector3 = localBoundingBoxSize
-        if #placements > 0 then prevSize = placements[#placements].Size end
-        local placement: bendPlacement.Placement = {
-          BoundsOffset = localBoundingBoxOffset,
-          Size = copySize,
-          Offset = runningPositionNow:Inverse() * cf,
-          PreviousSize = prevSize,
-        }
-
-        runningPositionNow = (runningPositionNow * placement.Offset):Orthonormalize()
-        placement.CFrame = runningPositionNow
-        table.insert(placements, placement)
-
-        -- Find the reverse point
-        lastPart = Instance.new('Part')
-        lastPart.Size = localBoundingBoxSize
-        lastPart.Anchored = true
-        lastPart.CFrame = reverseRunningPositionNow * CFrame.new(localBoundingBoxOffset)
-        lastPart.Transparency = 0.5
-        lastPart.Parent = Workspace
-
-        cf = nil
-        while true do 
-          rct -= 1
-          if ct >= rct then break end -- Reached the boundary
-          cf = CFrame.lookAt(probedPoints[rct], probedPoints[math.clamp(rct + 1, 1, #probedPoints)])
-          
-          local overlapParams = OverlapParams.new()
-          overlapParams.FilterType = Enum.RaycastFilterType.Include
-          overlapParams.FilterDescendantsInstances = { lastPart }
-          overlapParams.MaxParts = 1
-
-          local parts = Workspace:GetPartBoundsInBox(cf * CFrame.new(localBoundingBoxOffset), localBoundingBoxSize, overlapParams)
-          if #parts == 0 then break end
-        end
-        task.wait() 
-        lastPart:Destroy()
-        if ct >= rct then break end -- Reached the boundary
-
-        -- Calculate the initial placement data
-        local reverseCopySize: Vector3 = localBoundingBoxSize + (deltaSize * rct / t1)
-        local prevReverseCopySize: Vector3 = localBoundingBoxSize + (deltaSize * (rct - 1) / t1)
-        local reversePlacement: bendPlacement.Placement ={
-          BoundsOffset = localBoundingBoxOffset,
-          Size = reverseCopySize,
-          Offset = reverseRunningPositionNow:Inverse() * cf,
-          PreviousSize = prevReverseCopySize,
-        }
-
-        reverseRunningPositionNow = (reverseRunningPositionNow * reversePlacement.Offset):Orthonormalize()
-        reversePlacement.CFrame = reverseRunningPositionNow
-        table.insert(reversePlacements, reversePlacement)
-      end
-      -- Remove middle placement to avoid overlap
-      if #placements > 1 then table.remove(placements, #placements) end
-
-      -- Reconstruct reverse placements
-      for i = #reversePlacements, 1, -1 do
-        local rp = reversePlacements[i]
-        if i == #reversePlacements then -- Remove overlap in the last offset
-          local lastPlacement: bendPlacement.Placement = placements[#placements]
-          rp.Offset = lastPlacement.CFrame:Inverse() * rp.CFrame
-          rp.CFrame = (lastPlacement.CFrame * rp.Offset):Orthonormalize()
+        local y = probedPoints[ct].Y
+        local cf: CFrame = CFrame.lookAt(probedPoints[ct], XYZtoXZ(probedPoints[math.clamp(ct + 1, 1, #probedPoints)], y))
+        if ct == 1 then cf = startCF end
+        table.insert(all_cfs, cf)
+        
+        local lPoint = cf * CFrame.new(-localBoundingBoxSize.X / 2, 0, 0)
+        local rPoint = cf * CFrame.new(localBoundingBoxSize.X / 2, 0, 0)
+        if prev_lPoint ~= nil and prev_rPoint ~= nil then
+          -- Check if any is falling behind
+          local diffL = prev_lPoint:PointToObjectSpace(lPoint.Position).Z
+          local diffR = prev_rPoint:PointToObjectSpace(rPoint.Position).Z
+          if diffL > 0 then -- Left is falling behind, should create section with more right points
+            table.insert(all_rPoints, rPoint.Position)
+            prev_rPoint = rPoint
+            table.insert(all_lPoints, 0) -- Instead of nil so that # length works properly
+            -- Adjust last valid left point Y position
+            local lastValidId = #all_lPoints
+            while all_lPoints[lastValidId] == 0 do lastValidId -= 1 end
+            all_lPoints[lastValidId] = Vector3.new(
+              all_lPoints[lastValidId].X,
+              (all_lPoints[lastValidId].Y * (#all_lPoints - lastValidId) + lPoint.Position.Y) / (#all_lPoints - lastValidId + 1),
+              all_lPoints[lastValidId].Z
+            )
+          elseif diffR > 0 then
+            table.insert(all_lPoints, lPoint.Position)
+            prev_lPoint = lPoint
+            table.insert(all_rPoints, 0)
+            -- Adjust last valid right point Y position
+            local lastValidId = #all_rPoints
+            while all_rPoints[lastValidId] == 0 do lastValidId -= 1 end
+            all_rPoints[lastValidId] = Vector3.new(
+              all_rPoints[lastValidId].X,
+              (all_rPoints[lastValidId].Y * (#all_rPoints - lastValidId) + rPoint.Position.Y) / (#all_rPoints - lastValidId + 1),
+              all_rPoints[lastValidId].Z
+            )
+          else
+            table.insert(all_lPoints, lPoint.Position)
+            table.insert(all_rPoints, rPoint.Position)
+            prev_lPoint = lPoint
+            prev_rPoint = rPoint
+          end
         else
-          rp.Offset = reversePlacements[i + 1].CFrame:Inverse() * rp.CFrame -- rp.Offset:Inverse() -- Causing numerical error
-          rp.CFrame = (reversePlacements[i + 1].CFrame * rp.Offset):Orthonormalize()
+          table.insert(all_lPoints, lPoint.Position)
+          table.insert(all_rPoints, rPoint.Position)
+          prev_lPoint = lPoint
+          prev_rPoint = rPoint
         end
-        -- ( Skipping CFrame adjustment )
-        table.insert(placements, rp)
+
+        -- Backwards
+        if ct >= rct then break end
+        local rcf: CFrame = CFrame.lookAt(probedPoints[rct], XYZtoXZ(probedPoints[math.clamp(rct + 1, 1, #probedPoints)], probedPoints[rct].Y))
+        if rct == t1 then rcf = endCF end
+        table.insert(rev_all_cfs, rcf)
+        
+        local rev_lPoint = rcf * CFrame.new(-localBoundingBoxSize.X / 2, 0, 0)
+        local rev_rPoint = rcf * CFrame.new(localBoundingBoxSize.X / 2, 0, 0)
+        if rev_prev_lPoint ~= nil and rev_prev_rPoint ~= nil then
+          -- Check if any is falling behind
+          local diffL = rev_prev_lPoint:PointToObjectSpace(rev_lPoint.Position).Z
+          local diffR = rev_prev_rPoint:PointToObjectSpace(rev_rPoint.Position).Z
+          if diffL < 0 then -- Left is falling behind, should create section with more right points
+            table.insert(rev_all_rPoints, rev_rPoint.Position)
+            rev_prev_rPoint = rev_rPoint
+            table.insert(rev_all_lPoints, 0) -- Instead of nil so that # length works properly
+            -- Adjust last valid left point Y position
+            local lastValidId = #rev_all_lPoints
+            while rev_all_lPoints[lastValidId] == 0 do lastValidId -= 1 end
+            rev_all_lPoints[lastValidId] = Vector3.new(
+              rev_all_lPoints[lastValidId].X,
+              (rev_all_lPoints[lastValidId].Y * (#rev_all_lPoints - lastValidId) + rev_lPoint.Position.Y) / (#rev_all_lPoints - lastValidId + 1),
+              rev_all_lPoints[lastValidId].Z
+            )
+          elseif diffR < 0 then
+            table.insert(rev_all_lPoints, rev_lPoint.Position)
+            rev_prev_lPoint = rev_lPoint
+            table.insert(rev_all_rPoints, 0)
+            -- Adjust last valid right point Y position
+            local lastValidId = #rev_all_rPoints
+            while rev_all_rPoints[lastValidId] == 0 do lastValidId -= 1 end
+            rev_all_rPoints[lastValidId] = Vector3.new(
+              rev_all_rPoints[lastValidId].X,
+              (rev_all_rPoints[lastValidId].Y * (#rev_all_rPoints - lastValidId) + rev_rPoint.Position.Y) / (#rev_all_rPoints - lastValidId + 1),
+              rev_all_rPoints[lastValidId].Z
+            )
+          else
+            table.insert(rev_all_lPoints, rev_lPoint.Position)
+            table.insert(rev_all_rPoints, rev_rPoint.Position)
+            rev_prev_lPoint = rev_lPoint
+            rev_prev_rPoint = rev_rPoint
+          end
+        else
+          table.insert(rev_all_lPoints, rev_lPoint.Position)
+          table.insert(rev_all_rPoints, rev_rPoint.Position)
+          rev_prev_lPoint = rev_lPoint
+          rev_prev_rPoint = rev_rPoint
+        end
+      end
+      for i = #rev_all_cfs, 1, -1 do
+        table.insert(all_cfs, rev_all_cfs[i])
+        table.insert(all_lPoints, rev_all_lPoints[i])
+        table.insert(all_rPoints, rev_all_rPoints[i])
+      end
+      for _, cf in ipairs(all_cfs) do
+        Terrain:FillBlock(cf * CFrame.new(0, -13, 0), Vector3.new(localBoundingBoxSize.X, 0, localBoundingBoxOffset.Z) + Vector3.new(4, 27, 3), Enum.Material.Asphalt)
+      end
+      for _, cf in ipairs(all_cfs) do
+        Terrain:FillBlock(cf * CFrame.new(0, 15 + localBoundingBoxSize.Y / 2, 0), localBoundingBoxSize + Vector3.new(6, 36, 5), Enum.Material.Air)
       end
 
-      -- Add end placement
-      local endPlacement: bendPlacement.Placement = {
-        BoundsOffset = localBoundingBoxOffset,
-        Size = localBoundingBoxSize, -- TODO: End size
-        Offset = placements[#placements].CFrame:Inverse() * endCF,
-        PreviousSize = localBoundingBoxSize,
-        CFrame = endCF
-      }
-      table.insert(placements, endPlacement)
+      -- Fix all points to startCF
+      local allPoints = #all_lPoints
+      for i = 1, allPoints do
+        if all_lPoints[i] ~= 0 then
+          all_lPoints[i] = startCF:PointToObjectSpace(all_lPoints[i])
+        else
+          all_lPoints[i] = nil
+        end
+        if all_rPoints[i] ~= 0 then
+          all_rPoints[i] = startCF:PointToObjectSpace(all_rPoints[i])
+        else
+          all_rPoints[i] = nil
+        end
+      end
 
-      -- Place the copies using offsets
-      local runningPosition = CFrame.new()
+      local WallSize: number = localBoundingBoxSize.Y
 
-      local emLeftWall = AssetService:CreateEditableMesh()
-      local lwbVertex: number = emLeftWall:AddVertex((runningPosition * CFrame.new(localBoundingBoxSize.X / 2, 0, 0)).Position)
-      local lwtVertex: number = emLeftWall:AddVertex((runningPosition * CFrame.new(localBoundingBoxSize.X / 2, 10, 0)).Position)
-      local emRightWall = AssetService:CreateEditableMesh()
-      local rwbVertex: number = emRightWall:AddVertex((runningPosition * CFrame.new(-localBoundingBoxSize.X / 2, 0, 0)).Position)
-      local rwtVertex: number = emRightWall:AddVertex((runningPosition * CFrame.new(-localBoundingBoxSize.X / 2, 10, 0)).Position)
-      local em: EditableMesh = AssetService:CreateEditableMesh()
-      local lVertex: number = em:AddVertex((runningPosition * CFrame.new(localBoundingBoxSize.X / 2, 0, 0)).Position)
-      local rVertex: number = em:AddVertex((runningPosition * CFrame.new(-localBoundingBoxSize.X / 2, 0, 0)).Position)
-      for _, placement in placements do
-        runningPosition = (runningPosition * placement.Offset):Orthonormalize()
-        -- Road
-        local nlVertex: number = em:AddVertex((runningPosition * CFrame.new(localBoundingBoxSize.X / 2, 0, 0)).Position)
-        local nrVertex: number = em:AddVertex((runningPosition * CFrame.new(-localBoundingBoxSize.X / 2, 0, 0)).Position)
+      local roadMesh: EditableMesh = AssetService:CreateEditableMesh()
+      local leftWallMesh: EditableMesh = AssetService:CreateEditableMesh()
+      local rightWallMesh: EditableMesh = AssetService:CreateEditableMesh()
 
-        em:AddTriangle(lVertex, nlVertex, nrVertex)
-        em:AddTriangle(lVertex, nrVertex, rVertex)
-        -- em:AddTriangle(lVertex, nrVertex, nlVertex)
-        -- em:AddTriangle(lVertex, rVertex, nrVertex)
-        lVertex = nlVertex
-        rVertex = nrVertex
+      local lastLPoint = all_lPoints[1]
+      local lastLPointRoadVertex = roadMesh:AddVertex(lastLPoint)
+      local lastLBPointWallVertex = leftWallMesh:AddVertex(lastLPoint)
+      local lastLTPointWallVertex = leftWallMesh:AddVertex(lastLPoint + Vector3.new(0, WallSize, 0))
+      
+      local lastRPoint = all_rPoints[1]
+      local lastRPointRoadVertex = roadMesh:AddVertex(lastRPoint)
+      local lastRBPointWallVertex = rightWallMesh:AddVertex(lastRPoint)
+      local lastRTPointWallVertex = rightWallMesh:AddVertex(lastRPoint + Vector3.new(0, WallSize, 0))
+
+      for i = 2, allPoints do
+        local lPoint = all_lPoints[i]
+        local rPoint = all_rPoints[i]
 
         -- Left wall
-        local nlwbVertex: number = emLeftWall:AddVertex((runningPosition * CFrame.new(localBoundingBoxSize.X / 2, 0, 0)).Position)
-        local nltVertex: number = emLeftWall:AddVertex((runningPosition * CFrame.new(localBoundingBoxSize.X / 2, 10, 0)).Position)
-        emLeftWall:AddTriangle(lwbVertex, nlwbVertex, nltVertex)
-        emLeftWall:AddTriangle(lwbVertex, nltVertex, lwtVertex)
-        emLeftWall:AddTriangle(lwbVertex, nltVertex, nlwbVertex)
-        emLeftWall:AddTriangle(lwbVertex, lwtVertex, nltVertex)
-        lwbVertex = nlwbVertex
-        lwtVertex = nltVertex
+        if lPoint ~= nil then
+          local lbPointWallVertex = leftWallMesh:AddVertex(lPoint)
+          local ltPointWallVertex = leftWallMesh:AddVertex(lPoint + Vector3.new(0, WallSize, 0))
+
+          -- Inner
+          leftWallMesh:AddTriangle(lastLBPointWallVertex, lbPointWallVertex, ltPointWallVertex)
+          leftWallMesh:AddTriangle(lastLBPointWallVertex, ltPointWallVertex, lastLTPointWallVertex)
+          -- Outer
+          leftWallMesh:AddTriangle(lastLBPointWallVertex, ltPointWallVertex, lbPointWallVertex)
+          leftWallMesh:AddTriangle(lastLBPointWallVertex, lastLTPointWallVertex, ltPointWallVertex)
+
+          lastLBPointWallVertex = lbPointWallVertex
+          lastLTPointWallVertex = ltPointWallVertex
+        end
 
         -- Right wall
-        local nrwbVertex: number = emRightWall:AddVertex((runningPosition * CFrame.new(-localBoundingBoxSize.X / 2, 0, 0)).Position)
-        local nrtVertex: number = emRightWall:AddVertex((runningPosition * CFrame.new(-localBoundingBoxSize.X / 2, 10, 0)).Position)
-        emRightWall:AddTriangle(rwbVertex, nrtVertex, nrwbVertex)
-        emRightWall:AddTriangle(rwbVertex, rwtVertex, nrtVertex)
-        emRightWall:AddTriangle(rwbVertex, nrwbVertex, nrtVertex)
-        emRightWall:AddTriangle(rwbVertex, nrtVertex, rwtVertex)
-        rwbVertex = nrwbVertex
-        rwtVertex = nrtVertex
+        if rPoint ~= nil then
+          local rbPointWallVertex = rightWallMesh:AddVertex(rPoint)
+          local rtPointWallVertex = rightWallMesh:AddVertex(rPoint + Vector3.new(0, WallSize, 0))
+
+          -- Inner
+          rightWallMesh:AddTriangle(lastRBPointWallVertex, rtPointWallVertex, rbPointWallVertex)
+          rightWallMesh:AddTriangle(lastRBPointWallVertex, lastRTPointWallVertex, rtPointWallVertex)
+          -- Outer
+          rightWallMesh:AddTriangle(lastRBPointWallVertex, rbPointWallVertex, rtPointWallVertex)
+          rightWallMesh:AddTriangle(lastRBPointWallVertex, rtPointWallVertex, lastRTPointWallVertex)
+
+          lastRBPointWallVertex = rbPointWallVertex
+          lastRTPointWallVertex = rtPointWallVertex
+        end
+
+        -- Road
+        if lPoint ~= nil and rPoint ~= nil then
+          local lPointRoadVertex = roadMesh:AddVertex(lPoint)
+          local rPointRoadVertex = roadMesh:AddVertex(rPoint)
+
+          roadMesh:AddTriangle(lastLPointRoadVertex, rPointRoadVertex, lPointRoadVertex)
+          roadMesh:AddTriangle(lastLPointRoadVertex, lastRPointRoadVertex, rPointRoadVertex)
+
+          lastLPoint = lPoint
+          lastLPointRoadVertex = lPointRoadVertex
+          lastRPoint = rPoint
+          lastRPointRoadVertex = rPointRoadVertex
+        elseif lPoint ~= nil then
+          local lPointRoadVertex = roadMesh:AddVertex(lPoint)
+          roadMesh:AddTriangle(lastLPointRoadVertex, lastRPointRoadVertex, lPointRoadVertex)
+          lastLPoint = lPoint
+          lastLPointRoadVertex = lPointRoadVertex
+        elseif rPoint ~= nil then
+          local rPointRoadVertex = roadMesh:AddVertex(rPoint)
+          roadMesh:AddTriangle(lastLPointRoadVertex, lastRPointRoadVertex, rPointRoadVertex)
+          lastRPoint = rPoint
+          lastRPointRoadVertex = rPointRoadVertex
+        end
       end
 
-      local roadPart = AssetService:CreateMeshPartAsync(Content.fromObject(em))
+      local roadPart = AssetService:CreateMeshPartAsync(Content.fromObject(roadMesh))
       roadPart.CFrame = startCF
       roadPart.Anchored = true
-      roadPart.Parent = Workspace
+      roadPart.Parent = pathFolder
       roadPart.Name = "Road"
       roadPart.Color = Color3.new(0.1, 0.1, 0.1)
       roadPart:AddTag('ROAD')
 
-      local leftWallPart = AssetService:CreateMeshPartAsync(Content.fromObject(emLeftWall))
+      local leftWallPart = AssetService:CreateMeshPartAsync(Content.fromObject(leftWallMesh))
       leftWallPart.CFrame = startCF
       leftWallPart.Anchored = true
-      leftWallPart.Parent = Workspace
+      leftWallPart.Parent = pathFolder
       leftWallPart.Name = "LeftWall"
       leftWallPart.Color = Color3.new(1, 1, 1)
       leftWallPart:AddTag('WALL')
 
-      local rightWallPart = AssetService:CreateMeshPartAsync(Content.fromObject(emRightWall))
+      local rightWallPart = AssetService:CreateMeshPartAsync(Content.fromObject(rightWallMesh))
       rightWallPart.CFrame = startCF
       rightWallPart.Anchored = true
-      rightWallPart.Parent = Workspace
+      rightWallPart.Parent = pathFolder
       rightWallPart.Name = "RightWall"
       rightWallPart.Color = Color3.new(1, 1, 1)
       rightWallPart:AddTag('WALL')
-
-      --[[
-      local lastCopy = TrackBaseTargets
-      local lastBasis = {
-        CFrame = center,
-        Offset = boundsOffset,
-        Size = localBoundingBoxSize,
-      }
-      
-      local resultsPerTarget = {}
-      do for i = 1, #TrackBaseTargets do resultsPerTarget[i] = {} end end
-      local resizeAlignPairsCache = {}
-
-      for _, placement in placements do
-        runningPosition *= placement.Offset
-        runningPosition = runningPosition:Orthonormalize()
-        
-        local thisCopy = ghostPreview.create(false, runningPosition, size, axis)
-        local thisInfo = {
-          CFrame = runningPosition,
-          Offset = boundsOffset,
-          Size = size,
-        }
-        Terrain:FillBlock(thisInfo.CFrame * CFrame.new(0, -15, 0), size + Vector3.new(7, 27, 3), Enum.Material.Asphalt)
-        Terrain:FillBlock(thisInfo.CFrame * CFrame.new(0, 15, 0), size + Vector3.new(3, 36, 5), Enum.Material.Air)
-
-        local resizeAlignResults = resizeAlignPairs(lastCopy, thisCopy, lastBasis, thisInfo, axis, resizeAlignPairsCache)
-        for j, resizeAlignResult in resizeAlignResults do
-          for _, resultInstance in resizeAlignResult do
-            table.insert(resultsPerTarget[j], resultInstance)
-          end
-        end
-
-        -- This must insert the actual copy after any auxiliary instances
-        -- created by resize align.
-        for j, resultInstance in thisCopy do table.insert(resultsPerTarget[j], resultInstance) end
-        lastCopy = thisCopy
-        lastBasis = thisInfo
-      end
-
-      if prev ~= nil then
-        local firstCopy = TrackBaseTargets
-        local firstBasis = {
-          CFrame = center,
-          Offset = boundsOffset,
-          Size = size,
-        }
-        Terrain:FillBlock(prevBasis.CFrame * CFrame.new(0, -15, 0), size + Vector3.new(7, 27, 3), Enum.Material.Asphalt)
-        Terrain:FillBlock(prevBasis.CFrame * CFrame.new(0, 15, 0), size + Vector3.new(2, 36, 3), Enum.Material.Air)
-        local alignResults = resizeAlignPairs(prev, firstCopy, prevBasis, firstBasis, axis, resizeAlignPairsCache)
-        for j, resizeAlignResult in alignResults do
-          for _, resultInstance in resizeAlignResult do
-            table.insert(resultsPerTarget[j], resultInstance)
-          end
-        end
-      end
-      prevBasis = lastBasis
-      prev = lastCopy
-
-      ghostPreview.trim()
-      ]]
     end
   end
 end

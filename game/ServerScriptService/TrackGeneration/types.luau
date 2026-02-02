@@ -7,7 +7,8 @@ export type Point = {
   Direction: Vector3?,
   Next: Point?,
   Part: BasePart?,
-  Bonus: number?
+  Bonus: number?,
+  Collider: BasePart?
 }
 
 return {}
