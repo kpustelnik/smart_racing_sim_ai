@@ -38,11 +38,10 @@ class TrainingBridge:
     
     def freeze(self, status: bool) -> None:
         """
-        Request Roblox to spawn agents for a virtual environment.
+        Request Roblox to freeze or unfreeze agents' physics.
         
         Args:
-            env_id: Unique identifier for the virtual environment
-            agents: List of agent IDs to spawn (e.g., ["car_0_env_xxx", "car_1_env_xxx"])
+            status: Whether the environment should be frozen or unfrozen.
         """
         self._bridge.send_command("FREEZE", "", {"status": status})
     

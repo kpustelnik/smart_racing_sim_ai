@@ -6,8 +6,10 @@ export type Point = {
   Special: string?,
   Direction: Vector3?,
   Next: Point?,
-  Part: BasePart?,
   Bonus: number?,
+  
+  -- Roblox only
+  Part: BasePart?,
   Collider: BasePart?
 }
 

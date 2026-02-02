@@ -22,7 +22,7 @@ local Constants = require(script.Parent:WaitForChild('Constants'))
 	closest approach on the first ray between the two rays specified by the
 	arguments.
 ]]
-local function intersectRayRay(r1o: Vector3, r1d: Vector3, r2o: Vector3, r2d: Vector3): boolean
+local function intersectRayRay(r1o: Vector3, r1d: Vector3, r2o: Vector3, r2d: Vector3): (boolean, number?)
 	local n: number =
 		(r2o - r1o):Dot(r1d) * r2d:Dot(r2d) +
 		(r1o - r2o):Dot(r2d) * r1d:Dot(r2d)
