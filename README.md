@@ -560,7 +560,7 @@ Pre-built structures and terrain generation were out of scope of this projects a
 ---
     
 # Credits
-- https://www.roblox.com/games/215383192/Classic-Racing - car templates and physics
+- https://devforum.roblox.com/t/new-studio-racing-template/2805745 - car templates, physics and steering
 - https://github.com/stravant/roblox-redupe - aligning road templates
 - https://github.com/stravant/roblox-resizealign/blob/main/src/main.server.lua - simple aligning road templates
 - https://gist.github.com/LukeMS/89dc587abd786f92d60886f4977b1953 - priority queue implementation
