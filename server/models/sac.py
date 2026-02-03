@@ -200,10 +200,19 @@ class SACTrainer(ModelTrainer):
         env = ss.frame_stack_v1(env, stack_size=self.STACK_SIZE)
         env = ss.pettingzoo_env_to_vec_env_v1(env)
         env = SB3VecEnvWrapper(env)
-        env = VecNormalize(env, norm_obs=True, norm_reward=True, clip_obs=10.0)
 
         model_path = os.path.join(self.MODELS_DIR, f"{self.model_id}.zip")
         stats_path = os.path.join(self.MODELS_DIR, f"{self.model_id}_vecnormalize.pkl")
+
+        if os.path.exists(stats_path):
+            try:
+                print(f"[{self.model_id}] Loading normalization stats...")
+                env = VecNormalize.load(stats_path, env)
+            except Exception as e:
+                print(f"[{self.model_id}] Load failed: {e}. Creating new VecNormalize.")
+                env = VecNormalize(env, norm_obs=True, norm_reward=True, clip_obs=10.0)
+        else:
+            env = VecNormalize(env, norm_obs=True, norm_reward=True, clip_obs=10.0)
         
         # TensorBoard log path
         tb_log_path = os.path.join(self.LOGS_DIR, f"{self.model_id}_sac")
@@ -214,9 +223,6 @@ class SACTrainer(ModelTrainer):
                 print(f"[{self.model_id}] Loading existing SAC model...")
                 model = SAC.load(model_path, env=env, device=self.HYPERPARAMETERS["device"])
                 model.tensorboard_log = tb_log_path
-                if os.path.exists(stats_path):
-                    print(f"[{self.model_id}] Loading normalization stats...")
-                    env = VecNormalize.load(stats_path, env)
             except Exception as e:
                 print(f"[{self.model_id}] Load failed: {e}. Creating new SAC model.")
                 model = self.create_model(env, tensorboard_log=tb_log_path)
