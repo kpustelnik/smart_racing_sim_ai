@@ -275,7 +275,7 @@ CmdHandler.GetReward = function (self: CmdHandler, carData: CarsController.CarDa
   if totalProgress > carData.LastBestProgress then
     carData.LastBestProgress = totalProgress
     carData.LastBestProgressTime = tick()
-  elseif tick() - carData.LastBestProgressTime > 4 and carData.FreezeStart == nil then
+  elseif tick() - carData.LastBestProgressTime > 4 and carData.FreezeStart == nil then -- TODO: Add as parameter
     carData.TruncationPending = true -- Stuck for too long
   end
 

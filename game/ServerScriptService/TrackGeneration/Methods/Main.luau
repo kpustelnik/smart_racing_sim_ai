@@ -7,7 +7,7 @@ local SpawnerPart = Map:WaitForChild("Spawner")
 local PrebuiltObjects = Map:WaitForChild('Prebuilt')
 
 local Utilities = game:GetService("ServerScriptService"):WaitForChild("Utilities")
-local PriorityQueue = require(Utilities:WaitForChild('PrioritiyQueue'))
+local PriorityQueue = require(Utilities:WaitForChild('PriorityQueue'))
 local queue = PriorityQueue()
 
 local Types = require(script.Parent.Parent:WaitForChild("types"))
