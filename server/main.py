@@ -4,9 +4,9 @@
 A modular WebSocket server for training RL agents in a Roblox racing environment.
 
 Usage:
-    python new.py --model-type ppo
-    python new.py --model-type sac --mode use
-    python new.py --list-models
+    python main.py --model-type ppo
+    python main.py --model-type sac --mode use
+    python main.py --list-models
 
 Arguments:
     --model-type, -m    Model type to use (ppo, sac, etc.)
@@ -178,10 +178,10 @@ def parse_args():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-    python new.py --model-type ppo
-    python new.py -m sac --port 8080
-    python new.py --mode use -m ppo       # Inference only (no training)
-    python new.py --list-models
+    python main.py --model-type ppo
+    python main.py -m sac --port 8080
+    python main.py --mode use -m ppo       # Inference only (no training)
+    python main.py --list-models
         """,
     )
     
