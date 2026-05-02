@@ -109,7 +109,7 @@ type RayConfig = {
 
 local EnableDebugParts: boolean = false
 local RaycastOffset = Vector3.new(0, 7, 0)
-local shouldIgnoreTrack: boolean = false -- TODO: Extend the walls and ignore the track itself potentially
+local shouldIgnoreTrack: boolean = false
 CarsController.GetRaycasts = function (car: Model): { number }?
   local Config: any = CarsController.LoadConfig(car)
   if Config == nil then return end
@@ -144,6 +144,7 @@ CarsController.GetRaycasts = function (car: Model): { number }?
       end
     end
     if shouldIgnoreTrack then
+       -- TODO: Extend the walls
       local RoadParts: { Instance } = CollectionService:GetTagged('ROAD')
       for _, roadPart: Instance in ipairs(RoadParts) do
         if roadPart:IsA('BasePart') then table.insert(IgnoredDescendants, roadPart) end

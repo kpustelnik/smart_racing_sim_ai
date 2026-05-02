@@ -291,7 +291,7 @@ CmdHandler.GetReward = function (self: CmdHandler, carData: CarsController.CarDa
   local maxVelocity: number = carEngine:GetAttribute('forwardMaxSpeed') :: any
   local normalizedSpeed: number = math.clamp(velocityStatus / maxVelocity, 0, 1)
   local speedBonus: number = (math.exp(normalizedSpeed * 2) - 1) * 0.5 -- max ~3.2 at full speed
-  reward += speedBonus
+  -- reward += speedBonus
 
   if carData.TruncationPending or carData.TerminationPending then
     return -20, totalProgress
@@ -329,6 +329,12 @@ CmdHandler.Setup = function (self: CmdHandler): ()
     local isNoneUpdated: boolean = true
 
     for EnvId: string, EnvData: EnvData in pairs(self.Envs) do
+      local AnyAgentTerminating: boolean = false
+      for _, AgentId: string in ipairs(EnvData.Agents) do
+        local CarData: CarsController.CarData? = CarsController.GetCarData(AgentId)
+        if CarData == nil then continue end
+        if CarData.TerminationPending or CarData.TruncationPending then AnyAgentTerminating = true break end
+      end
       for _, AgentId: string in ipairs(EnvData.Agents) do
         local CarData: CarsController.CarData? = CarsController.GetCarData(AgentId)
         if CarData == nil then continue end
@@ -345,7 +351,8 @@ CmdHandler.Setup = function (self: CmdHandler): ()
         
         local wasTerminationPending: boolean = CarData.TerminationPending
         local wasTruncationPending: boolean = CarData.TruncationPending
-        if wasTerminationPending or wasTruncationPending then -- Respawn the car due to termination and/or truncation (so that we providfe fresh data)
+        local isRemoving: boolean = (self.TerminateAll and AnyAgentTerminating) or wasTerminationPending or wasTruncationPending
+        if isRemoving then -- Respawn the car due to termination and/or truncation (so that we provide fresh data)
           CmdHandler['RESET_AGENTS'](self, { agents = { AgentId } } :: ResetData, EnvId)
           CarData = CarsController.GetCarData(AgentId) -- Retrieve fresh data
           if CarData == nil then continue end
@@ -357,6 +364,8 @@ CmdHandler.Setup = function (self: CmdHandler): ()
           print(`Car {AgentId} terminated. Total Progress: {totalProgress}`)
         elseif wasTruncationPending then
           print(`Car {AgentId} truncated due to inactivity. Total Progress: {totalProgress}`)
+        elseif isRemoving then
+          print(`Car ${AgentId} removed due to another termination within virtual environment. Total Progress: {totalProgress}`)
         end
         dataToSend[AgentId] = {
           -- last_observation?
@@ -364,7 +373,7 @@ CmdHandler.Setup = function (self: CmdHandler): ()
           -- last_action?
           reward = reward,
           terminated = wasTerminationPending,
-          truncated = wasTruncationPending
+          truncated = wasTruncationPending or (self.TerminateAll and AnyAgentTerminating)
         } :: DataToSend
       end
     end
@@ -396,6 +405,7 @@ CmdHandler.New = function (wsClient: WebStreamClient, carModel: string): CmdHand
     MaxFPS = 15,
 
     EnableEnvCollisions = true,
+    TerminateAll = false,
     CarModel = carModel
   }, CmdHandler)
   return self
