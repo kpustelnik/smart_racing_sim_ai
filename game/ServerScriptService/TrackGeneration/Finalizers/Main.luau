@@ -32,6 +32,15 @@ local max = function (...: number): number
   return currentMax
 end
 
+local min = function (...: number): number
+  local args: { number } = {...}
+  local currentMin: number = math.huge
+  for _, v in ipairs(args) do
+    if v < currentMin then currentMin = v end
+  end
+  return currentMin
+end
+
 return function (path: { Types.Point }, pathFolder: Folder): ()
   -- Checkpoints
   local checkpointIndex = 0
@@ -127,7 +136,7 @@ return function (path: { Types.Point }, pathFolder: Folder): ()
             while all_lPoints[lastValidId] == 0 do lastValidId -= 1 end
             all_lPoints[lastValidId] = Vector3.new(
               all_lPoints[lastValidId].X,
-              max(all_lPoints[lastValidId].Y, lPoint.Position.Y), -- (all_lPoints[lastValidId].Y * (#all_lPoints - lastValidId) + lPoint.Position.Y) / (#all_lPoints - lastValidId + 1),
+              min(all_lPoints[lastValidId].Y, lPoint.Position.Y), -- (all_lPoints[lastValidId].Y * (#all_lPoints - lastValidId) + lPoint.Position.Y) / (#all_lPoints - lastValidId + 1),
               all_lPoints[lastValidId].Z
             )
           elseif diffR > 0 then
@@ -139,7 +148,7 @@ return function (path: { Types.Point }, pathFolder: Folder): ()
             while all_rPoints[lastValidId] == 0 do lastValidId -= 1 end
             all_rPoints[lastValidId] = Vector3.new(
               all_rPoints[lastValidId].X,
-              max(all_rPoints[lastValidId].Y, rPoint.Position.Y), -- (all_rPoints[lastValidId].Y * (#all_rPoints - lastValidId) + rPoint.Position.Y) / (#all_rPoints - lastValidId + 1),
+              min(all_rPoints[lastValidId].Y, rPoint.Position.Y), -- (all_rPoints[lastValidId].Y * (#all_rPoints - lastValidId) + rPoint.Position.Y) / (#all_rPoints - lastValidId + 1),
               all_rPoints[lastValidId].Z
             )
           else
@@ -208,10 +217,10 @@ return function (path: { Types.Point }, pathFolder: Folder): ()
       end
       prev_lPoint = CFrame.new(rev_all_lPoints[1]) * CFrame.fromEulerAnglesYXZ(first_rev_prev_lPoint:ToEulerAnglesYXZ())
       prev_rPoint = CFrame.new(rev_all_rPoints[1]) * CFrame.fromEulerAnglesYXZ(first_rev_prev_rPoint:ToEulerAnglesYXZ())
-      for i = #rev_all_cfs, 1, -1 do
-        table.insert(all_cfs, rev_all_cfs[i])
-        table.insert(all_lPoints, rev_all_lPoints[i])
-        table.insert(all_rPoints, rev_all_rPoints[i])
+      for j = #rev_all_cfs, 1, -1 do
+        table.insert(all_cfs, rev_all_cfs[j])
+        table.insert(all_lPoints, rev_all_lPoints[j])
+        table.insert(all_rPoints, rev_all_rPoints[j])
       end
       for _, cf in ipairs(all_cfs) do
         Terrain:FillBlock(cf * CFrame.new(0, -13, 0), Vector3.new(localBoundingBoxSize.X, 0, localBoundingBoxOffset.Z) + Vector3.new(4, 27, 3), Enum.Material.Asphalt)
@@ -222,18 +231,19 @@ return function (path: { Types.Point }, pathFolder: Folder): ()
 
       -- Fix all points to startCF
       local allPoints = #all_lPoints
-      for i = 1, allPoints do
-        if all_lPoints[i] ~= 0 then
-          all_lPoints[i] = startCF:PointToObjectSpace(all_lPoints[i])
+      for j = 1, allPoints do
+        if all_lPoints[j] ~= 0 then
+          all_lPoints[j] = startCF:PointToObjectSpace(all_lPoints[j])
         else
-          all_lPoints[i] = nil
+          all_lPoints[j] = nil
         end
-        if all_rPoints[i] ~= 0 then
-          all_rPoints[i] = startCF:PointToObjectSpace(all_rPoints[i])
+        if all_rPoints[j] ~= 0 then
+          all_rPoints[j] = startCF:PointToObjectSpace(all_rPoints[j])
         else
-          all_rPoints[i] = nil
+          all_rPoints[j] = nil
         end
       end
+      local localUpVector = startCF:PointToObjectSpace(startCF.Position + Vector3.new(0, 1, 0))
 
       local WallSize: number = localBoundingBoxSize.Y
 
@@ -244,21 +254,22 @@ return function (path: { Types.Point }, pathFolder: Folder): ()
       local lastLPoint = all_lPoints[1]
       local lastLPointRoadVertex = roadMesh:AddVertex(lastLPoint)
       local lastLBPointWallVertex = leftWallMesh:AddVertex(lastLPoint)
-      local lastLTPointWallVertex = leftWallMesh:AddVertex(lastLPoint + Vector3.new(0, WallSize, 0))
+      local lastLTPointWallVertex = leftWallMesh:AddVertex(lastLPoint + WallSize * localUpVector)
       
       local lastRPoint = all_rPoints[1]
       local lastRPointRoadVertex = roadMesh:AddVertex(lastRPoint)
       local lastRBPointWallVertex = rightWallMesh:AddVertex(lastRPoint)
-      local lastRTPointWallVertex = rightWallMesh:AddVertex(lastRPoint + Vector3.new(0, WallSize, 0))
+      local lastRTPointWallVertex = rightWallMesh:AddVertex(lastRPoint + WallSize * localUpVector)
 
-      for i = 2, allPoints do
-        local lPoint = all_lPoints[i]
-        local rPoint = all_rPoints[i]
+      for j = 2, allPoints do
+        local isLast = j == allPoints
+        local lPoint = all_lPoints[j]
+        local rPoint = all_rPoints[j]
 
         -- Left wall
         if lPoint ~= nil then
           local lbPointWallVertex = leftWallMesh:AddVertex(lPoint)
-          local ltPointWallVertex = leftWallMesh:AddVertex(lPoint + Vector3.new(0, WallSize, 0))
+          local ltPointWallVertex = leftWallMesh:AddVertex(lPoint + WallSize * localUpVector)
 
           -- Inner
           leftWallMesh:AddTriangle(lastLBPointWallVertex, lbPointWallVertex, ltPointWallVertex)
@@ -274,7 +285,7 @@ return function (path: { Types.Point }, pathFolder: Folder): ()
         -- Right wall
         if rPoint ~= nil then
           local rbPointWallVertex = rightWallMesh:AddVertex(rPoint)
-          local rtPointWallVertex = rightWallMesh:AddVertex(rPoint + Vector3.new(0, WallSize, 0))
+          local rtPointWallVertex = rightWallMesh:AddVertex(rPoint + WallSize * localUpVector)
 
           -- Inner
           rightWallMesh:AddTriangle(lastRBPointWallVertex, rtPointWallVertex, rbPointWallVertex)
@@ -289,8 +300,14 @@ return function (path: { Types.Point }, pathFolder: Folder): ()
 
         -- Road
         if lPoint ~= nil and rPoint ~= nil then
-          local lPointRoadVertex = roadMesh:AddVertex(lPoint)
-          local rPointRoadVertex = roadMesh:AddVertex(rPoint)
+          local final_lPoint = lPoint
+          local final_rPoint = rPoint
+          if isLast then
+            final_lPoint = final_lPoint + 0.05 * localUpVector
+            final_rPoint = final_rPoint + 0.05 * localUpVector
+          end
+          local lPointRoadVertex = roadMesh:AddVertex(final_lPoint)
+          local rPointRoadVertex = roadMesh:AddVertex(final_rPoint)
 
           roadMesh:AddTriangle(lastLPointRoadVertex, rPointRoadVertex, lPointRoadVertex)
           roadMesh:AddTriangle(lastLPointRoadVertex, lastRPointRoadVertex, rPointRoadVertex)

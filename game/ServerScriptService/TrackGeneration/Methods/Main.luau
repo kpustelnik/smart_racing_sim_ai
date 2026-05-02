@@ -173,6 +173,10 @@ return function (pathFolder: Folder): { Point }
     if objectNodes ~= nil then
       for _, node in ipairs(objectNodes:GetChildren()) do
         if node:IsA('BasePart') then
+          node.CanCollide = false
+          node.CanTouch = false
+          node.CanQuery = false
+
           local SpecialAttribute = node:GetAttribute('SPECIAL')
           local Point: Point = {
             Position = node.Position,
