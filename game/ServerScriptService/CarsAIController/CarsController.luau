@@ -137,11 +137,12 @@ CarsController.GetRaycasts = function (car: Model): { number }?
       local Env: unknown? = car:GetAttribute('ENV')
       if Env ~= nil and typeof(Env) == 'string' then
         for _, otherCar: Instance in pairs(CarsFolder:GetChildren()) do
-          if otherCar:IsA('Model') and otherCar:GetAttribute('ENV') ~= Env then
+          if otherCar:IsA('Model') and otherCar:GetAttribute('ENV') ~= Env then -- Ignore cars from other environments
             table.insert(IgnoredDescendants, otherCar)
           end
         end
       end
+      table.insert(IgnoredDescendants, car) -- Ignore the car itself
     end
     if shouldIgnoreTrack then
        -- TODO: Extend the walls
