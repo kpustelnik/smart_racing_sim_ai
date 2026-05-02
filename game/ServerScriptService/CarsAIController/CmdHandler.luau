@@ -298,7 +298,9 @@ CmdHandler.GetReward = function (self: CmdHandler, carData: CarsController.CarDa
   end
 
   if carData.IsTouchingAgent then -- Touching penalty
-    reward -= 0.2
+    if self.EnableEnvCollisions then
+      reward -= 0.2
+    end
     carData.IsTouchingAgent = false
   end
 

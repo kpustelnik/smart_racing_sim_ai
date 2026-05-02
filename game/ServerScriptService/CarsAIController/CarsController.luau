@@ -288,9 +288,10 @@ CarsController.SetupCarEvents = function (Id: string): ()
       for _, otherCarModel: Instance in ipairs(CarsFolder:GetChildren()) do
         if otherCarModel:IsA('Model') and otherCarModel ~= carModel and hit:IsDescendantOf(otherCarModel) then
           local env: string? = otherCarModel:GetAttribute('ENV')
-          if env ~= nil and env == carModel:GetAttribute('ENV') then continue end
-          carData.IsTouchingAgent = true
-          break
+          if env ~= nil and env == carModel:GetAttribute('ENV') then
+            carData.IsTouchingAgent = true
+            break
+          end
         end
       end
     end)
