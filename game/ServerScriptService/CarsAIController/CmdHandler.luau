@@ -297,6 +297,11 @@ CmdHandler.GetReward = function (self: CmdHandler, carData: CarsController.CarDa
     return -20, totalProgress
   end
 
+  if carData.IsTouchingAgent then -- Touching penalty
+    reward -= 0.2
+    carData.IsTouchingAgent = false
+  end
+
   return reward, totalProgress
 end
 
@@ -373,7 +378,7 @@ CmdHandler.Setup = function (self: CmdHandler): ()
           -- last_action?
           reward = reward,
           terminated = wasTerminationPending,
-          truncated = wasTruncationPending or (self.TerminateAll and AnyAgentTerminating)
+          truncated = wasTruncationPending or (self.TerminateAll and AnyAgentTerminating and not wasTerminationPending)
         } :: DataToSend
       end
     end

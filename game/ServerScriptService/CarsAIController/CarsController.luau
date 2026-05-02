@@ -137,7 +137,7 @@ CarsController.GetRaycasts = function (car: Model): { number }?
       local Env: unknown? = car:GetAttribute('ENV')
       if Env ~= nil and typeof(Env) == 'string' then
         for _, otherCar: Instance in pairs(CarsFolder:GetChildren()) do
-          if otherCar:IsA('Model') and otherCar:GetAttribute('ENV') == Env then
+          if otherCar:IsA('Model') and otherCar:GetAttribute('ENV') ~= Env then
             table.insert(IgnoredDescendants, otherCar)
           end
         end
@@ -162,7 +162,7 @@ CarsController.GetRaycasts = function (car: Model): { number }?
       part.Anchored = true
       part.CanTouch = false
       part.CanQuery = false
-      part.BrickColor = BrickColor.new("Really red")
+      part.BrickColor = if rc.IgnoreCars then BrickColor.new("Really red") else BrickColor.new("Bright blue")
       part.Size = Vector3.new(1, 1, (hitPosition - startPos).Magnitude)
       part.Parent = car
       part.CFrame = CFrame.lookAt((hitPosition + startPos) / 2, hitPosition)
@@ -205,6 +205,7 @@ export type CarData = {
   LastCheckpoint: number,
   LastObservation: CarObservation?,
   LastUpdateTime: number?,
+  IsTouchingAgent: boolean,
 
   TruncationPending: boolean,
   TerminationPending: boolean,
@@ -278,6 +279,22 @@ CarsController.SetupCarEvents = function (Id: string): ()
     local wallTouchedConn: RBXScriptConnection = Wall.Touched:Connect(wallTouchedHandler)
     table.insert(connections, wallTouchedConn)
   end
+
+  -- Cars collision detectionue end
+  local chassis = carModel:FindFirstChild('Chassis')
+  if chassis ~= nil then
+    local carPartTouchedConn: RBXScriptConnection = chassis.Touched:Connect(function (hit: BasePart): ()
+      for _, otherCarModel: Instance in ipairs(CarsFolder:GetChildren()) do
+        if otherCarModel:IsA('Model') and otherCarModel ~= carModel and hit:IsDescendantOf(otherCarModel) then
+          local env: string? = otherCarModel:GetAttribute('ENV')
+          if env ~= nil and env == carModel:GetAttribute('ENV') then continue end
+          carData.IsTouchingAgent = true
+          break
+        end
+      end
+    end)
+    table.insert(connections, carPartTouchedConn)
+  end
 end
 
 export type CarObservation = { number }
@@ -346,6 +363,7 @@ CarsController.SetupCar = function (Id: string, EnvId: string, Model: string, Sp
     LastCheckpoint = 1,
     LastObservation = nil,
     LastUpdateTime = nil,
+    IsTouchingAgent = false,
 
     TerminationPending = false,
     TruncationPending = false,
