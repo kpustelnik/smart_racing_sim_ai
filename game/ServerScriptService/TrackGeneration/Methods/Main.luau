@@ -136,7 +136,7 @@ return function (pathFolder: Folder): { Point }
   -- Add points visualisation
   local PointsFolder: Folder = Instance.new("Folder")
   PointsFolder.Name = "Points"
-  PointsFolder.Parent = workspace
+  PointsFolder.Parent = Workspace
   
   -- Add prebuilt objects' colliders
   local CollidersFolder: Folder = Instance.new('Folder')
