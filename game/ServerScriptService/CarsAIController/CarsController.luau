@@ -105,6 +105,7 @@ type RayConfig = {
   IncludeNormal: boolean,
   IgnoreCars: boolean,
   IgnoreXZRotation: boolean,
+  IgnoreTrack: boolean?,
   Offset: Vector3?
 }
 
@@ -145,7 +146,9 @@ CarsController.GetRaycasts = function (car: Model): { number }?
       end
       table.insert(IgnoredDescendants, car) -- Ignore the car itself
     end
-    if not rc.IgnoreCars then -- Ignore the track if cars should be detected
+    -- Ignore the track if cars should be detected
+    local IgnoreTrack: boolean = if rc.IgnoreTrack ~= nil then rc.IgnoreTrack else not rc.IgnoreCars
+    if IgnoreTrack then
       local RoadParts: { Instance } = CollectionService:GetTagged('ROAD')
       for _, roadPart: Instance in ipairs(RoadParts) do
         if roadPart:IsA('BasePart') then table.insert(IgnoredDescendants, roadPart) end
