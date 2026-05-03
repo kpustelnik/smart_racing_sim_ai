@@ -147,7 +147,7 @@ CarsController.GetRaycasts = function (car: Model): { number }?
       table.insert(IgnoredDescendants, car) -- Ignore the car itself
     end
     -- Ignore the track if cars should be detected
-    local IgnoreTrack: boolean = if rc.IgnoreTrack ~= nil then rc.IgnoreTrack else not rc.IgnoreCars
+    local IgnoreTrack: boolean = if rc.IgnoreTrack ~= nil then rc.IgnoreTrack else true
     if IgnoreTrack then
       local RoadParts: { Instance } = CollectionService:GetTagged('ROAD')
       for _, roadPart: Instance in ipairs(RoadParts) do
@@ -156,7 +156,7 @@ CarsController.GetRaycasts = function (car: Model): { number }?
     end
     params.FilterDescendantsInstances = IgnoredDescendants
 
-    local offset = if rc.Offset ~= nil then rc.Offset else if rc.IgnoreCars then DefaultRaycastOffset else Vector3.new(0, 0, 0)
+    local offset = if rc.Offset ~= nil then rc.Offset else if rc.IgnoreCars then DefaultRaycastOffset else Vector3.new(0, 1, 0)
     local raycastResult: RaycastResult<BasePart>? = Workspace:Raycast(startPos + offset, targetPos - startPos, params)
 
     local hitPosition: Vector3 = if raycastResult ~= nil then raycastResult.Position else targetPos
@@ -172,7 +172,7 @@ CarsController.GetRaycasts = function (car: Model): { number }?
       part.Parent = car
       part.CFrame = CFrame.lookAt((hitPosition + startPos) / 2, hitPosition)
       part.Transparency = 0.5
-      task.defer(function(): () task.wait(); part:Destroy() end)
+      task.defer(function(): () task.wait(0.1); part:Destroy() end)
     end
     if EnableDebugPartsRayHits and raycastResult ~= nil then -- Debug hit parts
       local part: Part = Instance.new("Part")
@@ -184,7 +184,7 @@ CarsController.GetRaycasts = function (car: Model): { number }?
       part.Size = Vector3.new(1, 1, 1)
       part.Parent = car
       part.CFrame = CFrame.new(hitPosition)
-      task.defer(function(): () task.wait(); part:Destroy() end)
+      task.defer(function(): () task.wait(0.1); part:Destroy() end)
     end
 
     local Distance: number = (hitPosition - startPos).Magnitude

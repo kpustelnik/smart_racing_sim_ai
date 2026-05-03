@@ -359,6 +359,15 @@ CmdHandler.Setup = function (self: CmdHandler): ()
         local wasTerminationPending: boolean = CarData.TerminationPending
         local wasTruncationPending: boolean = CarData.TruncationPending
         local isRemoving: boolean = (self.TerminateAll and AnyAgentTerminating) or wasTerminationPending or wasTruncationPending
+        if isRemoving and not AnyAgentTerminating then continue end -- Wait for the next one to remove all at once (in case of TerminateAll) to provide a more consistent experience for the learning algorithm
+        if wasTerminationPending then
+          print(`Car {AgentId} terminated. Total Progress: {totalProgress}`)
+        elseif wasTruncationPending then
+          print(`Car {AgentId} truncated due to inactivity. Total Progress: {totalProgress}`)
+        elseif isRemoving then
+          print(`Car {AgentId} removed due to another termination within virtual environment. Total Progress: {totalProgress}`)
+        end
+
         if isRemoving then -- Respawn the car due to termination and/or truncation (so that we provide fresh data)
           CmdHandler['RESET_AGENTS'](self, { agents = { AgentId } } :: ResetData, EnvId)
           CarData = CarsController.GetCarData(AgentId) -- Retrieve fresh data
@@ -366,14 +375,6 @@ CmdHandler.Setup = function (self: CmdHandler): ()
         end
 
         local obs: CarsController.CarObservation = CarsController.RetrieveObservation(AgentId)
-
-        if wasTerminationPending then
-          print(`Car {AgentId} terminated. Total Progress: {totalProgress}`)
-        elseif wasTruncationPending then
-          print(`Car {AgentId} truncated due to inactivity. Total Progress: {totalProgress}`)
-        elseif isRemoving then
-          print(`Car ${AgentId} removed due to another termination within virtual environment. Total Progress: {totalProgress}`)
-        end
         dataToSend[AgentId] = {
           -- last_observation?
           obs = obs,
