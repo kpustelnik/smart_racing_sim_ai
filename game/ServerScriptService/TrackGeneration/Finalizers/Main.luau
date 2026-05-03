@@ -258,15 +258,15 @@ return function (path: { Types.Point }, pathFolder: Folder): ()
       local lastLPointRoadVertex = roadMesh:AddVertex(lastLPoint)
       local lastLBPointWallVertex = leftWallMesh:AddVertex(lastLPoint)
       local lastLTPointWallVertex = leftWallMesh:AddVertex(lastLPoint + WallHeight * localUpVector)
-      local lastLBPointInvisiWallVertex = leftInvisiWallMesh:AddVertex(lastLPoint - Vector3.new(0, invisiWallHeight / 2, 0))
-      local lastLTPointInvisiWallVertex = leftInvisiWallMesh:AddVertex(lastLPoint + Vector3.new(0, invisiWallHeight / 2, 0))
+      local lastLBPointInvisiWallVertex = leftInvisiWallMesh:AddVertex(lastLPoint - Vector3.new(0, invisiWallHeight / 2, 0) * localUpVector)
+      local lastLTPointInvisiWallVertex = leftInvisiWallMesh:AddVertex(lastLPoint + Vector3.new(0, invisiWallHeight / 2, 0) * localUpVector)
       
       local lastRPoint = all_rPoints[1]
       local lastRPointRoadVertex = roadMesh:AddVertex(lastRPoint)
       local lastRBPointWallVertex = rightWallMesh:AddVertex(lastRPoint)
       local lastRTPointWallVertex = rightWallMesh:AddVertex(lastRPoint + WallHeight * localUpVector)
-      local lastRBPointInvisiWallVertex = rightInvisiWallMesh:AddVertex(lastRPoint - Vector3.new(0, invisiWallHeight / 2, 0))
-      local lastRTPointInvisiWallVertex = rightInvisiWallMesh:AddVertex(lastRPoint + Vector3.new(0, invisiWallHeight / 2, 0))
+      local lastRBPointInvisiWallVertex = rightInvisiWallMesh:AddVertex(lastRPoint - Vector3.new(0, invisiWallHeight / 2, 0) * localUpVector)
+      local lastRTPointInvisiWallVertex = rightInvisiWallMesh:AddVertex(lastRPoint + Vector3.new(0, invisiWallHeight / 2, 0) * localUpVector)
 
       for j = 2, allPoints do
         local isLast = j == allPoints
@@ -277,8 +277,8 @@ return function (path: { Types.Point }, pathFolder: Folder): ()
         if lPoint ~= nil then
           local lbPointWallVertex = leftWallMesh:AddVertex(lPoint)
           local ltPointWallVertex = leftWallMesh:AddVertex(lPoint + WallHeight * localUpVector)
-          local lbPointInvisiWallVertex = leftInvisiWallMesh:AddVertex(lPoint - Vector3.new(0, invisiWallHeight / 2, 0))
-          local ltPointInvisiWallVertex = leftInvisiWallMesh:AddVertex(lPoint + Vector3.new(0, invisiWallHeight / 2, 0))
+          local lbPointInvisiWallVertex = leftInvisiWallMesh:AddVertex(lPoint - Vector3.new(0, invisiWallHeight / 2, 0) * localUpVector)
+          local ltPointInvisiWallVertex = leftInvisiWallMesh:AddVertex(lPoint + Vector3.new(0, invisiWallHeight / 2, 0) * localUpVector)
 
           -- Inner
           leftWallMesh:AddTriangle(lastLBPointWallVertex, lbPointWallVertex, ltPointWallVertex)
@@ -301,8 +301,8 @@ return function (path: { Types.Point }, pathFolder: Folder): ()
         if rPoint ~= nil then
           local rbPointWallVertex = rightWallMesh:AddVertex(rPoint)
           local rtPointWallVertex = rightWallMesh:AddVertex(rPoint + WallHeight * localUpVector)
-          local rbPointInvisiWallVertex = rightInvisiWallMesh:AddVertex(rPoint - Vector3.new(0, invisiWallHeight / 2, 0))
-          local rtPointInvisiWallVertex = rightInvisiWallMesh:AddVertex(rPoint + Vector3.new(0, invisiWallHeight / 2, 0))
+          local rbPointInvisiWallVertex = rightInvisiWallMesh:AddVertex(rPoint - Vector3.new(0, invisiWallHeight / 2, 0) * localUpVector)
+          local rtPointInvisiWallVertex = rightInvisiWallMesh:AddVertex(rPoint + Vector3.new(0, invisiWallHeight / 2, 0) * localUpVector)
 
           -- Inner
           rightWallMesh:AddTriangle(lastRBPointWallVertex, rtPointWallVertex, rbPointWallVertex)
