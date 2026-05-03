@@ -5,10 +5,9 @@ local wsUrl: string = `ws://localhost:8000/ws/{modelId}`
 local enableCollisions: boolean = true
 local terminateAll: boolean = false
 
-local Workspace = game:GetService("Workspace")
-local seed: number = 1777785024 -- os.time()
+local seed: number = 1777788314 -- os.time()
 print("Current seed:", seed)
-Workspace:SetAttribute("SEED", seed)
+game:GetService("Workspace"):SetAttribute("SEED", seed)
 
 task.wait(5) -- Wait for other scripts to load
 local TrackGeneration = require(script.Parent:WaitForChild('TrackGeneration'))
