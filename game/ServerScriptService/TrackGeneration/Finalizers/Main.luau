@@ -1,4 +1,5 @@
 --!strict
+local invisiWallHeight: number = 200
 
 local Types = require(script.Parent.Parent:WaitForChild("types"))
 
@@ -245,21 +246,27 @@ return function (path: { Types.Point }, pathFolder: Folder): ()
       end
       local localUpVector = startCF:PointToObjectSpace(startCF.Position + Vector3.new(0, 1, 0))
 
-      local WallSize: number = localBoundingBoxSize.Y
+      local WallHeight: number = localBoundingBoxSize.Y
 
       local roadMesh: EditableMesh = AssetService:CreateEditableMesh()
       local leftWallMesh: EditableMesh = AssetService:CreateEditableMesh()
       local rightWallMesh: EditableMesh = AssetService:CreateEditableMesh()
+      local leftInvisiWallMesh: EditableMesh = AssetService:CreateEditableMesh()
+      local rightInvisiWallMesh: EditableMesh = AssetService:CreateEditableMesh()
 
       local lastLPoint = all_lPoints[1]
       local lastLPointRoadVertex = roadMesh:AddVertex(lastLPoint)
       local lastLBPointWallVertex = leftWallMesh:AddVertex(lastLPoint)
-      local lastLTPointWallVertex = leftWallMesh:AddVertex(lastLPoint + WallSize * localUpVector)
+      local lastLTPointWallVertex = leftWallMesh:AddVertex(lastLPoint + WallHeight * localUpVector)
+      local lastLBPointInvisiWallVertex = leftInvisiWallMesh:AddVertex(lastLPoint - Vector3.new(0, invisiWallHeight / 2, 0))
+      local lastLTPointInvisiWallVertex = leftInvisiWallMesh:AddVertex(lastLPoint + Vector3.new(0, invisiWallHeight / 2, 0))
       
       local lastRPoint = all_rPoints[1]
       local lastRPointRoadVertex = roadMesh:AddVertex(lastRPoint)
       local lastRBPointWallVertex = rightWallMesh:AddVertex(lastRPoint)
-      local lastRTPointWallVertex = rightWallMesh:AddVertex(lastRPoint + WallSize * localUpVector)
+      local lastRTPointWallVertex = rightWallMesh:AddVertex(lastRPoint + WallHeight * localUpVector)
+      local lastRBPointInvisiWallVertex = rightInvisiWallMesh:AddVertex(lastRPoint - Vector3.new(0, invisiWallHeight / 2, 0))
+      local lastRTPointInvisiWallVertex = rightInvisiWallMesh:AddVertex(lastRPoint + Vector3.new(0, invisiWallHeight / 2, 0))
 
       for j = 2, allPoints do
         local isLast = j == allPoints
@@ -269,33 +276,49 @@ return function (path: { Types.Point }, pathFolder: Folder): ()
         -- Left wall
         if lPoint ~= nil then
           local lbPointWallVertex = leftWallMesh:AddVertex(lPoint)
-          local ltPointWallVertex = leftWallMesh:AddVertex(lPoint + WallSize * localUpVector)
+          local ltPointWallVertex = leftWallMesh:AddVertex(lPoint + WallHeight * localUpVector)
+          local lbPointInvisiWallVertex = leftInvisiWallMesh:AddVertex(lPoint - Vector3.new(0, invisiWallHeight / 2, 0))
+          local ltPointInvisiWallVertex = leftInvisiWallMesh:AddVertex(lPoint + Vector3.new(0, invisiWallHeight / 2, 0))
 
           -- Inner
           leftWallMesh:AddTriangle(lastLBPointWallVertex, lbPointWallVertex, ltPointWallVertex)
           leftWallMesh:AddTriangle(lastLBPointWallVertex, ltPointWallVertex, lastLTPointWallVertex)
+          leftInvisiWallMesh:AddTriangle(lastLBPointInvisiWallVertex, lbPointInvisiWallVertex, ltPointInvisiWallVertex)
+          leftInvisiWallMesh:AddTriangle(lastLBPointInvisiWallVertex, ltPointInvisiWallVertex, lastLTPointInvisiWallVertex)
           -- Outer
           leftWallMesh:AddTriangle(lastLBPointWallVertex, ltPointWallVertex, lbPointWallVertex)
           leftWallMesh:AddTriangle(lastLBPointWallVertex, lastLTPointWallVertex, ltPointWallVertex)
+          leftInvisiWallMesh:AddTriangle(lastLBPointInvisiWallVertex, ltPointInvisiWallVertex, lbPointInvisiWallVertex)
+          leftInvisiWallMesh:AddTriangle(lastLBPointInvisiWallVertex, lastLTPointInvisiWallVertex, ltPointInvisiWallVertex)
 
           lastLBPointWallVertex = lbPointWallVertex
           lastLTPointWallVertex = ltPointWallVertex
+          lastLBPointInvisiWallVertex = lbPointInvisiWallVertex
+          lastLTPointInvisiWallVertex = ltPointInvisiWallVertex
         end
 
         -- Right wall
         if rPoint ~= nil then
           local rbPointWallVertex = rightWallMesh:AddVertex(rPoint)
-          local rtPointWallVertex = rightWallMesh:AddVertex(rPoint + WallSize * localUpVector)
+          local rtPointWallVertex = rightWallMesh:AddVertex(rPoint + WallHeight * localUpVector)
+          local rbPointInvisiWallVertex = rightInvisiWallMesh:AddVertex(rPoint - Vector3.new(0, invisiWallHeight / 2, 0))
+          local rtPointInvisiWallVertex = rightInvisiWallMesh:AddVertex(rPoint + Vector3.new(0, invisiWallHeight / 2, 0))
 
           -- Inner
           rightWallMesh:AddTriangle(lastRBPointWallVertex, rtPointWallVertex, rbPointWallVertex)
           rightWallMesh:AddTriangle(lastRBPointWallVertex, lastRTPointWallVertex, rtPointWallVertex)
+          rightInvisiWallMesh:AddTriangle(lastRBPointInvisiWallVertex, rtPointInvisiWallVertex, rbPointInvisiWallVertex)
+          rightInvisiWallMesh:AddTriangle(lastRBPointInvisiWallVertex, lastRTPointInvisiWallVertex, rtPointInvisiWallVertex)
           -- Outer
           rightWallMesh:AddTriangle(lastRBPointWallVertex, rbPointWallVertex, rtPointWallVertex)
           rightWallMesh:AddTriangle(lastRBPointWallVertex, rtPointWallVertex, lastRTPointWallVertex)
+          rightInvisiWallMesh:AddTriangle(lastRBPointInvisiWallVertex, rbPointInvisiWallVertex, rtPointInvisiWallVertex)
+          rightInvisiWallMesh:AddTriangle(lastRBPointInvisiWallVertex, rtPointInvisiWallVertex, lastRTPointInvisiWallVertex)
 
           lastRBPointWallVertex = rbPointWallVertex
           lastRTPointWallVertex = rtPointWallVertex
+          lastRBPointInvisiWallVertex = rbPointInvisiWallVertex
+          lastRTPointInvisiWallVertex = rtPointInvisiWallVertex
         end
 
         -- Road
@@ -352,6 +375,23 @@ return function (path: { Types.Point }, pathFolder: Folder): ()
       rightWallPart.Name = "RightWall"
       rightWallPart.Color = Color3.new(1, 1, 1)
       rightWallPart:AddTag('WALL')
+
+      -- Invisible walls
+      local leftInvisiWallPart = AssetService:CreateMeshPartAsync(Content.fromObject(leftInvisiWallMesh))
+      leftInvisiWallPart.CFrame = startCF
+      leftInvisiWallPart.Anchored = true
+      leftInvisiWallPart.Parent = pathFolder
+      leftInvisiWallPart.Name = "LeftInvisiWall"
+      leftInvisiWallPart.Transparency = 0.7
+      leftInvisiWallPart:AddTag('WALL')
+
+      local rightInvisiWallPart = AssetService:CreateMeshPartAsync(Content.fromObject(rightInvisiWallMesh))
+      rightInvisiWallPart.CFrame = startCF
+      rightInvisiWallPart.Anchored = true
+      rightInvisiWallPart.Parent = pathFolder
+      rightInvisiWallPart.Name = "RightInvisiWall"
+      rightInvisiWallPart.Transparency = 0.7
+      rightInvisiWallPart:AddTag('WALL')
     end
   end
 end

@@ -145,7 +145,7 @@ return function (pathFolder: Folder): { Point }
   -- Add other colliders
   for _, part: Instance in ipairs(CollectionService:GetTagged('COLLIDER')) do if part:IsA('BasePart') then part.Parent = CollidersFolder end end
 
-  local random: Random = Random.new()
+  local random: Random = Random.new(Workspace:GetAttribute("SEED"))
   local Points: { Point } = {}
 
   local PrebuiltConfigs: { [Instance]: any? } = {}

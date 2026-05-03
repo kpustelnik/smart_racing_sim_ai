@@ -104,12 +104,13 @@ type RayConfig = {
   Direction: Vector3,
   IncludeNormal: boolean,
   IgnoreCars: boolean,
-  IgnoreXZRotation: boolean
+  IgnoreXZRotation: boolean,
+  Offset: Vector3?
 }
 
-local EnableDebugParts: boolean = false
-local RaycastOffset = Vector3.new(0, 7, 0)
-local shouldIgnoreTrack: boolean = false
+local EnableDebugPartsRays: boolean = false
+local EnableDebugPartsRayHits: boolean = false
+local DefaultRaycastOffset = Vector3.new(0, 7, 0)
 CarsController.GetRaycasts = function (car: Model): { number }?
   local Config: any = CarsController.LoadConfig(car)
   if Config == nil then return end
@@ -144,8 +145,7 @@ CarsController.GetRaycasts = function (car: Model): { number }?
       end
       table.insert(IgnoredDescendants, car) -- Ignore the car itself
     end
-    if shouldIgnoreTrack then
-       -- TODO: Extend the walls
+    if not rc.IgnoreCars then -- Ignore the track if cars should be detected
       local RoadParts: { Instance } = CollectionService:GetTagged('ROAD')
       for _, roadPart: Instance in ipairs(RoadParts) do
         if roadPart:IsA('BasePart') then table.insert(IgnoredDescendants, roadPart) end
@@ -153,11 +153,12 @@ CarsController.GetRaycasts = function (car: Model): { number }?
     end
     params.FilterDescendantsInstances = IgnoredDescendants
 
-    local raycastResult: RaycastResult<BasePart>? = Workspace:Raycast(startPos + RaycastOffset, targetPos - startPos, params)
+    local offset = if rc.Offset ~= nil then rc.Offset else if rc.IgnoreCars then DefaultRaycastOffset else Vector3.new(0, 0, 0)
+    local raycastResult: RaycastResult<BasePart>? = Workspace:Raycast(startPos + offset, targetPos - startPos, params)
 
     local hitPosition: Vector3 = if raycastResult ~= nil then raycastResult.Position else targetPos
     
-    if EnableDebugParts then -- Debug parts
+    if EnableDebugPartsRays then -- Debug parts
       local part: Part = Instance.new("Part")
       part.CanCollide = false
       part.Anchored = true
@@ -168,6 +169,18 @@ CarsController.GetRaycasts = function (car: Model): { number }?
       part.Parent = car
       part.CFrame = CFrame.lookAt((hitPosition + startPos) / 2, hitPosition)
       part.Transparency = 0.5
+      task.defer(function(): () task.wait(); part:Destroy() end)
+    end
+    if EnableDebugPartsRayHits and raycastResult ~= nil then -- Debug hit parts
+      local part: Part = Instance.new("Part")
+      part.CanCollide = false
+      part.Anchored = true
+      part.CanTouch = false
+      part.CanQuery = false
+      part.BrickColor = if rc.IgnoreCars then BrickColor.new("Bright yellow") else BrickColor.new("Bright green")
+      part.Size = Vector3.new(1, 1, 1)
+      part.Parent = car
+      part.CFrame = CFrame.new(hitPosition)
       task.defer(function(): () task.wait(); part:Destroy() end)
     end
 

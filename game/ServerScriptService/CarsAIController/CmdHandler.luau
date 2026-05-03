@@ -294,12 +294,12 @@ CmdHandler.GetReward = function (self: CmdHandler, carData: CarsController.CarDa
   -- reward += speedBonus
 
   if carData.TruncationPending or carData.TerminationPending then
-    return -20, totalProgress
+    return -25, totalProgress
   end
 
   if carData.IsTouchingAgent then -- Touching penalty
     if self.EnableEnvCollisions then
-      reward -= 0.2
+      reward -= 0.1
     end
     carData.IsTouchingAgent = false
   end
