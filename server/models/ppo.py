@@ -164,6 +164,14 @@ class PPOTrainer(ModelTrainer):
         "ent_coef": 0.01,
         "net_arch": [128, 128],
         "device": "cpu",
+        "clip_range": 0.4,
+    }
+
+    LOAD_PARAMETERS = {
+        "clip_range": lambda _: 0.4,
+        "ent_coef": 0.05,
+        "learning_rate": 0.0003,
+        "lr_schedule": lambda _: 0.0003
     }
     
     def create_model(self, env: Any, tensorboard_log: Optional[str] = None) -> PPO:
@@ -179,6 +187,7 @@ class PPOTrainer(ModelTrainer):
             n_steps=hp["n_steps"],
             batch_size=hp["batch_size"],
             ent_coef=hp["ent_coef"],
+            clip_range=hp["clip_range"],
             policy_kwargs=policy_kwargs,
             device=hp["device"],
             tensorboard_log=tensorboard_log,
@@ -218,12 +227,12 @@ class PPOTrainer(ModelTrainer):
         
         # TensorBoard log path
         tb_log_path = os.path.join(self.LOGS_DIR, f"{self.model_id}_ppo")
-        
+
         # Load or create model
         if os.path.exists(model_path):
             try:
                 print(f"[{self.model_id}] Loading existing PPO model...")
-                model = PPO.load(model_path, env=env, device=self.HYPERPARAMETERS["device"])
+                model = PPO.load(model_path, env=env, device=self.HYPERPARAMETERS["device"], custom_objects=self.LOAD_PARAMETERS)
                 model.tensorboard_log = tb_log_path
             except Exception as e:
                 print(f"[{self.model_id}] Load failed: {e}. Creating new PPO model.")
