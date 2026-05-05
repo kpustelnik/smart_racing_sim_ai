@@ -23,6 +23,7 @@ local EnvColors = {
   Color3.new(0, 1, 1),
 }
 local LastEnvColor = 0
+local NoProgressTimeout: number = 5 -- TODO: Add as global parameter
 
 -- Creates a new environment
 type CreateEnvData = {}
@@ -347,9 +348,15 @@ CmdHandler.GetReward = function (self: CmdHandler, carData: CarsController.CarDa
   
   local totalProgress: number = carData.CurrentLap + trackProgress
   if totalProgress > carData.LastBestProgress then
+    if math.floor(totalProgress) > math.floor(carData.LastBestProgress) then
+      local ct: number = tick()
+      self.SumLoopsTime += ct - carData.LastLoopStartTime
+      self.AllLoops += 1
+      carData.LastLoopStartTime = ct
+    end
     carData.LastBestProgress = totalProgress
     carData.LastBestProgressTime = tick()
-  elseif tick() - carData.LastBestProgressTime > 4 and carData.FreezeStart == nil then -- TODO: Add as parameter
+  elseif tick() - carData.LastBestProgressTime > NoProgressTimeout and carData.FreezeStart == nil then
     carData.TruncationPending = true -- Stuck for too long
   end
 
@@ -412,8 +419,14 @@ CmdHandler.GetReward = function (self: CmdHandler, carData: CarsController.CarDa
     if self.EnableEnvCollisions then
       reward -= 60
       carData.TerminationPending = true
+      self.AllCollisions += 1
     end
     carData.IsTouchingAgent = false
+  end
+
+  if carData.TerminationPending then
+    self.AllAgentLoops += totalProgress
+    self.AllAgents += 1
   end
 
   if carData.TruncationPending or carData.TerminationPending then
@@ -435,6 +448,9 @@ CmdHandler.Setup = function (self: CmdHandler): ()
   local runningPrevious: boolean = false
   local totalDt: number = 0 -- Total delta time
   local ConsecutiveUnresponsiveTicks: number = 0
+  local sct: number = tick()
+  local lastStatisticsPrint: number = sct
+  local evaluationStart: number = sct
 
   self.HeartbeatEvent = RunService.Heartbeat:Connect(function (dt: number): ()
     totalDt += dt
@@ -443,6 +459,16 @@ CmdHandler.Setup = function (self: CmdHandler): ()
       warn('Executed another update before previous finished')
       return
     end
+    
+    local ct: number = tick()
+    if ct > lastStatisticsPrint + 30 then
+      print('Average loop time: ', self.SumLoopsTime / math.max(self.AllLoops, 1))
+      print('Average loop progress: ', self.AllAgentLoops / math.max(self.AllAgents, 1))
+      print('Agents colliding %: ', math.round(self.AllCollisions / self.AllAgents * 100))
+      print('Evaluation time: ', ct - evaluationStart)
+      lastStatisticsPrint = ct
+    end
+
     dt = totalDt
     totalDt = 0
     runningPrevious = true
@@ -527,6 +553,12 @@ CmdHandler.New = function (wsClient: WebStreamClient, carModel: string): CmdHand
     WSClient = wsClient,
     HeartbeatEvent = nil,
     MaxFPS = 15,
+
+    SumLoopsTime = 0, 
+    AllLoops = 0,
+    AllAgentLoops = 0,
+    AllCollisions = 0,
+    AllAgents = 0,
 
     EnableEnvCollisions = true,
     TerminateAll = false,
