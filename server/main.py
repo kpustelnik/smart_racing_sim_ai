@@ -30,7 +30,6 @@ import threading
 # --- CONFIGURATION ---
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 8000
-NUM_AGENTS = 3
 
 # --- DATA BRIDGE (internal implementation) ---
 class DataBridge:
@@ -40,8 +39,7 @@ class DataBridge:
     Use TrainingBridge facade for documented public API.
     """
     
-    def __init__(self, num_agents: int):
-        self.num_agents = num_agents
+    def __init__(self):
         self.obs_queues: dict[str, queue.Queue] = {}
         self.command_queue: queue.Queue = queue.Queue()
 
@@ -117,7 +115,7 @@ def create_app(model_type: str, mode: str = "train") -> FastAPI:
     async def websocket_endpoint(websocket: WebSocket, model_id: str):
         await websocket.accept()
 
-        bridge = DataBridge(num_agents=NUM_AGENTS)
+        bridge = DataBridge()
         
         target_func = train_model if mode == "train" else use_model
         thread_name = f"{mode}_{model_id}"

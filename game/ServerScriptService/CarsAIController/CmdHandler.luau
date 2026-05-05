@@ -250,9 +250,83 @@ CmdHandler.Cleanup = function (self: CmdHandler): ()
   end
 end
 
+CmdHandler.GetCarEnv = function (self: CmdHandler, carData: CarsController.CarData): string?
+  for EnvId: string, EnvData: EnvData in pairs(self.Envs) do
+    for _, AgentId: string in ipairs(EnvData.Agents) do
+      local cCarData: CarsController.CarData? = CarsController.GetCarData(AgentId)
+      if cCarData == nil then continue end
+      if cCarData == carData then return EnvId end
+    end
+  end
+  return nil
+end
+
+CmdHandler.GetNextCar = function (self: CmdHandler, carData: CarsController.CarData): (CarsController.CarData?, number?)
+  local EnvId: string = self:GetCarEnv(carData) :: string
+  if EnvId == nil then return nil end
+  local EnvData: EnvData? = self.Envs[EnvId]
+  if EnvData == nil then return nil end
+
+  local carPivot: CFrame = carData.Model:GetPivot()
+  local carTrackProgress: number = CheckpointsController.GetTrackProgressState(carPivot.Position, carPivot.LookVector)
+
+  local nextCarData: CarsController.CarData? = nil
+  local nextCarProgress: number = math.huge
+  for _, AgentId: string in ipairs(EnvData.Agents) do
+    local cCarData: CarsController.CarData? = CarsController.GetCarData(AgentId)
+    if cCarData == nil then continue end
+    local cCarModel: Model? = cCarData.Model
+    if cCarModel == nil or cCarModel == carData.Model then continue end
+
+    local cCarPivot: CFrame = cCarModel:GetPivot()
+    local cProgress: number = CheckpointsController.GetTrackProgressState(cCarPivot.Position, cCarPivot.LookVector)
+    if cProgress > carTrackProgress and cProgress < nextCarProgress then
+      nextCarData = cCarData
+      nextCarProgress = cProgress
+    end
+  end
+
+  if nextCarData == nil then return nil, nil end
+  return nextCarData, nextCarProgress
+end
+
+CmdHandler.GetFollowingCar = function (self: CmdHandler, carData: CarsController.CarData): (CarsController.CarData?, number?)
+  local EnvId: string = self:GetCarEnv(carData) :: string
+  if EnvId == nil then return nil end
+  local EnvData: EnvData? = self.Envs[EnvId]
+  if EnvData == nil then return nil end
+
+  local carPivot: CFrame = carData.Model:GetPivot()
+  local carTrackProgress: number = CheckpointsController.GetTrackProgressState(carPivot.Position, carPivot.LookVector)
+
+  local followingCarData: CarsController.CarData? = nil
+  local followingCarProgress: number = 0
+  for _, AgentId: string in ipairs(EnvData.Agents) do
+    local cCarData: CarsController.CarData? = CarsController.GetCarData(AgentId)
+    if cCarData == nil then continue end
+    local cCarModel: Model? = cCarData.Model
+    if cCarModel == nil or cCarModel == carData.Model then continue end
+
+    local cCarPivot: CFrame = cCarModel:GetPivot()
+    local cProgress: number = CheckpointsController.GetTrackProgressState(cCarPivot.Position, cCarPivot.LookVector)
+    if cProgress < carTrackProgress and cProgress > followingCarProgress then
+      followingCarData = cCarData
+      followingCarProgress = cProgress
+    end
+  end
+
+  if followingCarData == nil then return nil, nil end
+  return followingCarData, followingCarProgress
+end
+
 CmdHandler.GetReward = function (self: CmdHandler, carData: CarsController.CarData): (number?, number?)
   local carModel: Model? = carData.Model
   if carModel == nil then return end
+
+  if carData.IsTouchingWall then
+    if self.WallKill then carData.TerminationPending = true end
+    carData.IsTouchingWall = false
+  end
 
   local carCFrame: CFrame = carModel:GetPivot()
   local carPosition = carCFrame.Position
@@ -283,25 +357,67 @@ CmdHandler.GetReward = function (self: CmdHandler, carData: CarsController.CarDa
   carData.LastReportedProgress = totalProgress
 
   reward *= 1000
-  if reward < 0 then reward *= 20 end
+  if reward < 0 then reward *= 25 end
+
+  -- apply reward based on the distance to the next and following cars
+  if self.EnableEnvCollisions then
+    local numberOfCarsCounted: number = 0
+    local totalDistances: number = 0
+
+    -- Next car
+    local nextCarData: CarsController.CarData?, nextCarProgress: number? = self:GetNextCar(carData)
+    if nextCarData ~= nil and nextCarProgress ~= nil then
+      local distance: number = (nextCarProgress - trackProgress) * CheckpointsController.GetTrackSize()
+      if carData.PrevNextDistance ~= nil then
+        local distanceDiff: number = distance - carData.PrevNextDistance
+        totalDistances += -distanceDiff -- Reward / penalize for getting closer to the next car
+        numberOfCarsCounted += 1
+      end
+      carData.PrevNextDistance = distance
+    else
+      carData.PrevNextDistance = nil
+      reward += 1 -- Bonus for maintaining the first position
+    end
+
+    -- Following car
+    local followingCarData: CarsController.CarData?, followingCarProgress: number? = self:GetFollowingCar(carData)
+    if followingCarData ~= nil and followingCarProgress ~= nil then
+      local distance: number = (trackProgress - followingCarProgress) * CheckpointsController.GetTrackSize()
+      if carData.PrevFollowingDistance ~= nil then
+        local distanceDiff: number = distance - carData.PrevFollowingDistance
+        totalDistances += distanceDiff -- Reward / penalize for getting farther from the following car
+        numberOfCarsCounted += 1
+      end
+      carData.PrevFollowingDistance = distance
+    else
+      carData.PrevFollowingDistance = nil
+      reward -= 1 -- Penalty for maintaining the last position
+    end
+
+    if numberOfCarsCounted > 0 then totalDistances /= numberOfCarsCounted end
+    reward += totalDistances * 0.005
+  end
 
   -- non-linear speed bonus (exponential scaling)
+  --[[
   local carEngine = carData.CarEngine
   local velocityStatus: number = carEngine:GetAttribute('_speed') :: any
   local maxVelocity: number = carEngine:GetAttribute('forwardMaxSpeed') :: any
   local normalizedSpeed: number = math.clamp(velocityStatus / maxVelocity, 0, 1)
   local speedBonus: number = (math.exp(normalizedSpeed * 2) - 1) * 0.5 -- max ~3.2 at full speed
-  -- reward += speedBonus
-
-  if carData.TruncationPending or carData.TerminationPending then
-    return -25, totalProgress
-  end
+  reward += speedBonus
+  ]]
 
   if carData.IsTouchingAgent then -- Touching penalty
     if self.EnableEnvCollisions then
-      reward -= 0.1
+      reward -= 60
+      carData.TerminationPending = true
     end
     carData.IsTouchingAgent = false
+  end
+
+  if carData.TruncationPending or carData.TerminationPending then
+    return -40, totalProgress
   end
 
   return reward, totalProgress
@@ -414,6 +530,7 @@ CmdHandler.New = function (wsClient: WebStreamClient, carModel: string): CmdHand
 
     EnableEnvCollisions = true,
     TerminateAll = false,
+    WallKill = true,
     CarModel = carModel
   }, CmdHandler)
   return self

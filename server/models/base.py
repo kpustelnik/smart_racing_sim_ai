@@ -17,9 +17,6 @@ class TrainingBridge:
     - Sending commands to Roblox (spawn, reset, action, close)
     - Receiving observations from agents
     - Managing observation queues
-    
-    Attributes:
-        num_agents: Number of agents per environment
     """
     
     def __init__(self, data_bridge: Any):
@@ -30,7 +27,6 @@ class TrainingBridge:
             data_bridge: The underlying DataBridge instance
         """
         self._bridge = data_bridge
-        self.num_agents = data_bridge.num_agents
     
     # --- Command Methods (send to Roblox) ---
     
@@ -155,8 +151,8 @@ class ModelTrainer(ABC):
     BASE_STATE_DIM = RAYCASTS + NITRO_FUEL_STATE + PREV_ACTIONS + VELOCITY_STATE  # 12
     STACK_SIZE = 4 # How many actions to the past should be reflected
     ACTION_DIM = 3 # Steer, Throttle, Nitro
-    NUM_AGENTS = 5 # How many agents per environment
-    NUM_VENVS = 4 # How many parralel environments
+    NUM_AGENTS = 2 # How many agents per environment
+    NUM_VENVS = 5 # How many parralel environments
     
     MODELS_DIR = "saved_models"
     LOGS_DIR = "sb3_logs"

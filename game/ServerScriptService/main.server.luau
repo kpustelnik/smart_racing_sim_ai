@@ -2,6 +2,7 @@
 local modelId: string = 'telsa_new'
 local carModel: string = 'Telsa'
 local wsUrl: string = `ws://localhost:8000/ws/{modelId}`
+local wallKill: boolean = true
 local enableCollisions: boolean = true
 local terminateAll: boolean = false
 
@@ -20,7 +21,7 @@ local createWS = function (...): (boolean, any) return pcall(CarsAIController, .
 -- Spawn the base model
 task.spawn(function(): ()
   while true do
-    local success: boolean = createWS(wsUrl, modelId, carModel, enableCollisions, terminateAll)
+    local success: boolean = createWS(wsUrl, modelId, carModel, enableCollisions, terminateAll, wallKill)
     if success then
       print("Successfully ran websocket.")
     end

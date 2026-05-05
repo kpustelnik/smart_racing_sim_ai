@@ -6,17 +6,14 @@ type BackendMessage = CmdHandler.BackendMessage
 
 local TimeoutSeconds: number = 20
 
-return function (wsUrl: string, modelId: string, carModel: string, enableEnvCollisions: boolean?, terminateAll: boolean?): () -- Setup the AI controller
+return function (wsUrl: string, modelId: string, carModel: string, enableEnvCollisions: boolean?, terminateAll: boolean?, wallKill: boolean?): () -- Setup the AI controller
   -- WebSocket setup
   local websocketClient: WebStreamClient = HttpService:CreateWebStreamClient(Enum.WebStreamClientType.WebSocket, { Url = wsUrl })
   local CurrentCmdHandler: CmdHandler.CmdHandler = CmdHandler.New(websocketClient, carModel)
 
-  if enableEnvCollisions ~= nil then
-    CurrentCmdHandler.EnableEnvCollisions = enableEnvCollisions
-  end
-  if terminateAll ~= nil then
-    CurrentCmdHandler.TerminateAll = terminateAll
-  end
+  if enableEnvCollisions ~= nil then CurrentCmdHandler.EnableEnvCollisions = enableEnvCollisions end
+  if terminateAll ~= nil then CurrentCmdHandler.TerminateAll = terminateAll end
+  if wallKill ~= nil then CurrentCmdHandler.WallKill = wallKill end
   
   local startTime: number = tick()
   local lastMsgTime: number = startTime

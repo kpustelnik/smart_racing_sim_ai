@@ -222,10 +222,14 @@ export type CarData = {
   LastCheckpoint: number,
   LastObservation: CarObservation?,
   LastUpdateTime: number?,
+  IsTouchingWall: boolean,
   IsTouchingAgent: boolean,
 
   TruncationPending: boolean,
   TerminationPending: boolean,
+
+  PrevNextDistance: number?,
+  PrevFollowingDistance: number?,
 
   StartTime: number,
   FreezeStart: number?
@@ -281,13 +285,15 @@ CarsController.SetupCarEvents = function (Id: string): ()
   -- Cleanup the car on destroy
   local destroyConn: RBXScriptConnection = carModel.Destroying:Connect(function (): ()
     carData.Model = nil
-    carData.TerminationPending = true
+    carData.TruncationPending = true
   end)
   table.insert(connections, destroyConn)
 
   -- Walls collision detection
   local wallTouchedHandler = function (hit: BasePart): ()
-    if hit:IsDescendantOf(carModel) then carData.TerminationPending = true end
+    if hit:IsDescendantOf(carModel) then
+      carData.IsTouchingWall = true
+    end
   end
   local Walls = CollectionService:GetTagged('WALL')
   for _, Wall: Instance in ipairs(Walls) do
@@ -381,10 +387,14 @@ CarsController.SetupCar = function (Id: string, EnvId: string, Model: string, Sp
     LastCheckpoint = 1,
     LastObservation = nil,
     LastUpdateTime = nil,
+    IsTouchingWall = false,
     IsTouchingAgent = false,
 
     TerminationPending = false,
     TruncationPending = false,
+
+    PrevNextDistance = nil,
+    PrevFollowingDistance = nil,
 
     StartTime = ct,
     FreezeStart = nil

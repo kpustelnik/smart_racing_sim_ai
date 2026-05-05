@@ -12,6 +12,7 @@ local Checkpoints = Instance.new("Folder")
 Checkpoints.Name = "Checkpoints"
 Checkpoints.Parent = Workspace
 
+local trackWidth: number = 69 -- 49
 
 local function catmullRom(p0: Vector3, p1: Vector3, p2: Vector3, p3: Vector3, t: number)
     local t2: number = t * t
@@ -98,7 +99,7 @@ return function (path: { Types.Point }, pathFolder: Folder): ()
       -- Probe few extra points
       for t = 1.001, 1.01, 0.001 do table.insert(probedPoints, catmullRom(prv, a, b, nxt, t)) end
 
-      local localBoundingBoxSize: Vector3 = Vector3.new(49, 20, 1)
+      local localBoundingBoxSize: Vector3 = Vector3.new(trackWidth, 20, 1)
       local localBoundingBoxOffset: Vector3 = Vector3.new(0, 10, 0)
 
       local XYZtoXZ = function (v: Vector3, y: number): Vector3 return Vector3.new(v.X, y, v.Z) end

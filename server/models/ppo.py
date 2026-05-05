@@ -160,18 +160,19 @@ class PPOTrainer(ModelTrainer):
         "total_timesteps": 200_000,
         "learning_rate": 0.0003,
         "batch_size": 64,
-        "n_steps": 1024,
+        "n_steps": 2048,
         "ent_coef": 0.01,
         "net_arch": [128, 128],
         "device": "cpu",
-        "clip_range": 0.4,
+        "clip_range": 0.2,
     }
 
     LOAD_PARAMETERS = {
-        "clip_range": lambda _: 0.4,
-        "ent_coef": 0.05,
+        "clip_range": lambda _: 0.2,
+        "ent_coef": 0.01,
         "learning_rate": 0.0003,
-        "lr_schedule": lambda _: 0.0003
+        "lr_schedule": lambda _: 0.0003,
+        "batch_size": 64,
     }
     
     def create_model(self, env: Any, tensorboard_log: Optional[str] = None) -> PPO:
