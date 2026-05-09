@@ -3,6 +3,7 @@
 ## Overview
 
 This repository contains a ready to run Roblox Reinforced Learning environment (Gymnasium, Stable Baselines 3, Pettingzoo and Supersuit).
+Video preview: https://www.youtube.com/watch?v=23tVNKUoSOs
 It is composed of the Roblox environment part and Python backend part that communicate with each other via WebSocket 
 The WebSocket-based bridge enables training AI agents to drive cars using algorithms like PPO and SAC.
 Repository may easily be extended by different models and libraries simply by utilizing the exposed environment API.
