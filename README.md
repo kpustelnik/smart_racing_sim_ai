@@ -420,15 +420,34 @@ Reward function is being determined within the `CmdHandler.luau` script. It also
 local reward: number = 0
 
 reward += (currentProgress - lastProgress) * 1000
-if reward < 0 then reward *= 20 end -- Multiply additionaly by 20 if the reward negative
+if reward < 0 then reward *= 25 end -- Multiply additionaly by 25 if the reward negative
 
 -- Apply non-linear speed bonus
 local normalizedSpeed: number = math.clamp(velocity / maxVelocity, 0, 1)
 local speedBonus: number = (math.exp(normalizedSpeed * 2) - 1) * 0.5 -- max ~3.2 at full speed
-reward += speedBonus
+-- reward += speedBonus -- Optional
+
+if areCollisionsEnabled then
+  local distanceReward = 0
+  if isThereNextCar() then
+    distanceReward += 0.005 * deltaDistanceToNextCar
+  end
+  if isTherePreviousCar() then
+	distanceReward -= 0.005 * deltaDistanceToPreviousCar
+  end
+  if isThereNextCar() and isTherePreviousCar() then distanceReward /= 2 end
+  reward += distanceRewad
+  if isFirstPostition then reward += 1 end
+  if isLastPosition then reward -= 1 end
+end
+
+if isTouchingAnotherAgent and areCollisionsEnabled then
+  reward -= 60
+  markAgentForTermination()
+end
 
 if truncationPending or terminationPending then
-  return -20 -- Always return -20 reward if the agent is being truncated or terminated
+  return -40 -- Always return -40 reward if the agent is being truncated or terminated
 else
   return reward
 end
