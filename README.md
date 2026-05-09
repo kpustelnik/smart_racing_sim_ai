@@ -400,7 +400,6 @@ return {
 	}
 }
 ```
-In future due to difference in track's height it may be beneficial to artificially generate big invisible track walls and exclude the road itself from the raycasts.
 
 ### Other agent observations
 
