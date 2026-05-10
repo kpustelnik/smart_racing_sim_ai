@@ -394,7 +394,7 @@ return {
 			Direction = Vector3.new(0, 0, -15) * 25, -- Direction of the raycast
 			IncludeNormal = false, -- Whether additional info about raycast normal should be included
 			IgnoreCars = true, -- Whether this raycast should ignore other vehicles within same virtual environment
-      IgnoreXZRotation = false -- Only account Y-axis rotation of the vehicle (raycasts would be horizontal)
+			IgnoreXZRotation = false -- Only account Y-axis rotation of the vehicle (raycasts would be horizontal)
 		},
 		...
 	}
@@ -427,7 +427,7 @@ local normalizedSpeed: number = math.clamp(velocity / maxVelocity, 0, 1)
 local speedBonus: number = (math.exp(normalizedSpeed * 2) - 1) * 0.5 -- max ~3.2 at full speed
 -- reward += speedBonus -- Optional
 
-if areCollisionsEnabled then
+if isSharedFateMode then
   local distanceReward = 0
   if isThereNextCar() then
     distanceReward += 0.005 * deltaDistanceToNextCar
