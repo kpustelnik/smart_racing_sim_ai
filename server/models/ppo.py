@@ -3,13 +3,6 @@ PPO (Proximal Policy Optimization) Trainer
 
 A policy gradient method that uses clipped surrogate objective for stable training.
 Good for continuous action spaces and environments with high variance.
-
-Hyperparameters:
-- learning_rate: 0.0003
-- batch_size: 64 (smaller for on-policy updates)
-- n_steps: 1024 (steps to collect before each update)
-- ent_coef: 0.01 (entropy coefficient for exploration)
-- net_arch: [256, 256]
 """
 
 import os
