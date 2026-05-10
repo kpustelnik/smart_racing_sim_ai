@@ -367,7 +367,7 @@ CmdHandler.GetReward = function (self: CmdHandler, carData: CarsController.CarDa
   if reward < 0 then reward *= 25 end
 
   -- apply reward based on the distance to the next and following cars
-  if self.EnableEnvCollisions then
+  if self.TerminateAll then
     local numberOfCarsCounted: number = 0
     local totalDistances: number = 0
 

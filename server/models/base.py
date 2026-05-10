@@ -151,7 +151,7 @@ class ModelTrainer(ABC):
     BASE_STATE_DIM = RAYCASTS + NITRO_FUEL_STATE + PREV_ACTIONS + VELOCITY_STATE  # 12
     STACK_SIZE = 4 # How many actions to the past should be reflected
     ACTION_DIM = 3 # Steer, Throttle, Nitro
-    NUM_AGENTS = 2 # How many agents per environment
+    NUM_AGENTS = 5 # How many agents per environment
     NUM_VENVS = 5 # How many parralel environments
     
     MODELS_DIR = "saved_models"

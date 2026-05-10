@@ -12,7 +12,7 @@ local Checkpoints = Instance.new("Folder")
 Checkpoints.Name = "Checkpoints"
 Checkpoints.Parent = Workspace
 
-local trackWidth: number = 69 -- 49
+local trackWidth: number = 49 -- 69
 
 local function catmullRom(p0: Vector3, p1: Vector3, p2: Vector3, p3: Vector3, t: number)
     local t2: number = t * t

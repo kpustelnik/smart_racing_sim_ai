@@ -19,7 +19,7 @@ from typing import Any, Dict, Optional
 import gymnasium as gym
 from gymnasium import spaces
 from stable_baselines3 import PPO
-from stable_baselines3.common.vec_env import VecNormalize
+from stable_baselines3.common.vec_env import VecNormalize, VecMonitor
 from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
 
 from pettingzoo import ParallelEnv
@@ -212,6 +212,7 @@ class PPOTrainer(ModelTrainer):
         env = ss.frame_stack_v1(env, stack_size=self.STACK_SIZE)
         env = ss.pettingzoo_env_to_vec_env_v1(env)
         env = SB3VecEnvWrapper(env)
+        env = VecMonitor(env)
 
         model_path = os.path.join(self.MODELS_DIR, f"{self.model_id}.zip")
         stats_path = os.path.join(self.MODELS_DIR, f"{self.model_id}_vecnormalize.pkl")
@@ -293,6 +294,7 @@ class PPOTrainer(ModelTrainer):
         env = ss.frame_stack_v1(env, stack_size=self.STACK_SIZE)
         env = ss.pettingzoo_env_to_vec_env_v1(env)
         env = SB3VecEnvWrapper(env)
+        env = VecMonitor(env)
         
         # Load VecNormalize stats if available
         if os.path.exists(stats_path):
