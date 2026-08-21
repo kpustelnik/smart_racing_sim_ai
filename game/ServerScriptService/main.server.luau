@@ -1,12 +1,12 @@
 --!strict
-local modelId: string = 'telsa_new'
-local carModel: string = 'Telsa'
+local modelId: string = 'car_colls_new'
+local carModel: string = 'Car'
 local wsUrl: string = `ws://localhost:8000/ws/{modelId}`
 local wallKill: boolean = true
 local enableCollisions: boolean = true
 local terminateAll: boolean = false
 
-local seed: number = 1777788314 -- os.time()
+local seed: number = 1778399617 -- os.time()
 print("Current seed:", seed)
 game:GetService("Workspace"):SetAttribute("SEED", seed)
 

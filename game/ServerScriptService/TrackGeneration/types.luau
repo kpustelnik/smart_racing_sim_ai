@@ -1,6 +1,6 @@
 --!strict
 
-export type Poixnt = {
+export type Point = {
   Position: Vector3,
   Characteristics: number,
   Special: string?,
