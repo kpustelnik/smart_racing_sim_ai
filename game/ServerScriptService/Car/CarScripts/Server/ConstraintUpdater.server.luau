@@ -1,24 +1,19 @@
 --!strict
 -- FIN
--- Redresser Server Script by Roblox (Adjusted)
+-- Constraint Updater Server Script by Roblox (Adjusted)
 
 local Workspace: Workspace = game:GetService('Workspace')
 if not script:IsDescendantOf(Workspace) then return end -- Check if the car was already spawned
 
-local car: Folder = script.Parent.Parent.Parent
+local car: Folder = script.Parent.Parent.Parent :: any
 local engine: Folder = car:WaitForChild('Engine') :: Folder
 local steering: Folder = car:WaitForChild('Steering') :: Folder
 local suspension: Folder = car:WaitForChild('Suspension') :: Folder
 local antiRoll: Folder = car:WaitForChild('AntiRoll') :: Folder
 local redress: Folder = car:WaitForChild('Redress') :: Folder
 
-local ReadNumberAttribute = function (i: Instance, attrName: string): number?
-	local value: unknown? = i:GetAttribute(attrName)
-	if value ~= nil and typeof(value) == "number" then
-		return value :: number
-	end
-	return nil
-end
+local Attributes = require(script.Parent.Parent:WaitForChild('Attributes'))
+local ReadNumberAttribute = Attributes.readNumber
 
 -- Update suspension constraints
 local WheelFRSuspension: SpringConstraint = suspension:WaitForChild("WheelFRSuspension") :: SpringConstraint

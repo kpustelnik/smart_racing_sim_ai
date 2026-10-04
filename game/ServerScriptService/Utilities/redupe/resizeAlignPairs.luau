@@ -31,7 +31,7 @@ local Constants = require(script.Parent:WaitForChild('Constants'))
 	closest approach on the first ray between the two rays specified by the
 	arguments.
 ]]
-local function intersectRayRay(r1o: Vector3, r1d: Vector3, r2o: Vector3, r2d: Vector3): (boolean, number?)
+local function intersectRayRay(r1o: Vector3, r1d: Vector3, r2o: Vector3, r2d: Vector3): (boolean, number)
 	local n: number =
 		(r2o - r1o):Dot(r1d) * r2d:Dot(r2d) +
 		(r1o - r2o):Dot(r2d) * r1d:Dot(r2d)
@@ -39,7 +39,7 @@ local function intersectRayRay(r1o: Vector3, r1d: Vector3, r2o: Vector3, r2d: Ve
 		r1d:Dot(r1d) * r2d:Dot(r2d) -
 		r1d:Dot(r2d) * r1d:Dot(r2d)
 	if d == 0 then
-		return false
+		return false, 0
 	else
 		return true, n / d
 	end
@@ -423,7 +423,7 @@ end
 
 local function resizeAlignPairsRecursive(a: {Instance}, b: {Instance}, aBasis: ResizeAlignInfo, bBasis: ResizeAlignInfo, axis: Vector3, cache: ResizeAlignPairsCache, cacheIndex: number, resultList: {Instance}?): number
 	-- assert(#a == #b, "Mismatched number of instances to resize-align recursive")
-	for i: number, itemA: Instance in a do
+	for _i: number, itemA: Instance in a do
 		local itemB: Instance? = nil
 		for _, x in b do
 			if x.Name == itemA.Name then
@@ -458,7 +458,7 @@ end
 local function resizeAlignPairs(a: {Instance}, b: {Instance}, aBasis: ResizeAlignInfo, bBasis: ResizeAlignInfo, axis: Vector3, cache: ResizeAlignPairsCache): {{Instance}}
 	assert(#a == #b, "Mismatched number of instances to resize-align")
 	local allResults: {{Instance}} = {}
-	for i: number, item: Instance in a do
+	for i: number, _item: Instance in a do
 		local resultsForItem: {Instance} = {}
 		resizeAlignPairsRecursive({a[i]}, {b[i]}, aBasis, bBasis, axis, cache, 1, resultsForItem)
 		allResults[i] = resultsForItem

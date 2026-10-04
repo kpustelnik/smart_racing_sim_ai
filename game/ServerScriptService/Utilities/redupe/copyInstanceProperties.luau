@@ -59,7 +59,7 @@ local function getPropertiesToCopy(className: string): {string}
 	else
     -- Retrieve if properties not cached
 		local propertyTable: {string} = {}
-		for _, prop: ReflectedProperty in ReflectionService:GetPropertiesOfClass(className) :: {ReflectedProperty} do
+		for _, prop: ReflectedProperty in (ReflectionService:GetPropertiesOfClass(className) :: any) :: {ReflectedProperty} do
 			if prop.Permits.Write and prop.Permits.Read then
 				local name: string = prop.Name
 				if name ~= "Parent" then table.insert(propertyTable, name) end
@@ -92,7 +92,7 @@ local function getBaseEntry(className: string?): BaseEntry
 		BASE_ENTRY_CACHE[className] = newEntry
 		return newEntry
 	else
-		local info: ReflectedClass = ReflectionService:GetClass(className) :: ReflectedClass
+		local info: ReflectedClass = (ReflectionService:GetClass(className) :: any) :: ReflectedClass
 		local superclassInfo: BaseEntry = getBaseEntry(info.Superclass)
 		local newEntry: BaseEntry = {
 			Base = superclassInfo,

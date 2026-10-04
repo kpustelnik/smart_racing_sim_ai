@@ -1,4 +1,5 @@
-from .base import ModelTrainer, TrainingBridge
+from . import latency
+from .base import BridgeClosed, ModelTrainer, TrainingBridge
 from .ppo import PPOTrainer
 from .sac import SACTrainer
 
@@ -19,6 +20,8 @@ def list_available_models() -> list[str]:
     return list(MODEL_REGISTRY.keys())
 
 __all__ = [
+    "BridgeClosed",
+    "latency",
     "ModelTrainer",
     "TrainingBridge",
     "get_trainer",

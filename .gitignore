@@ -19,6 +19,8 @@ sourcemap.json
 server/sb3_logs
 server/saved_models
 
+game/ServerScriptService/seed.luau
+
 # TODO: Fully implement
 todo
 

@@ -1,398 +1,388 @@
 --!strict
-local invisiWallHeight: number = 200
 
 local Types = require(script.Parent.Parent:WaitForChild("types"))
+local FinalizerCommon = require(script.Parent.Parent:WaitForChild("FinalizerCommon"))
 
 local AssetService = game:GetService('AssetService')
-
+local ServerScriptService = game:GetService('ServerScriptService')
 local Workspace = game:GetService('Workspace')
-local Terrain = Workspace:WaitForChild('Terrain')
+local Terrain: Terrain = Workspace.Terrain
 
-local Checkpoints = Instance.new("Folder")
-Checkpoints.Name = "Checkpoints"
-Checkpoints.Parent = Workspace
+local Spline = require(ServerScriptService:WaitForChild('Utilities'):WaitForChild('Spline'))
 
+-- Options
 local trackWidth: number = 49 -- 69
+local wallHeight: number = 20
+local wallThickness: number = 1
+local invisiWallHeight: number = 200
+local invisiWallThickness: number = 2
+local roadThickness: number = 4
+local stationSpacing: number = 3
+local maxStationTurn: number = math.rad(2.5)
+local foldSafety: number = 0.85
+local minWidthFraction: number = 0.5
 
-local function catmullRom(p0: Vector3, p1: Vector3, p2: Vector3, p3: Vector3, t: number)
-    local t2: number = t * t
-    local t3: number = t2 * t
-    return 0.5 * (
-        (2 * p1) +
-        (-p0 + p2) * t +
-        (2*p0 - 5*p1 + 4*p2 - p3) * t2 +
-        (-p0 + 3*p1 - 3*p2 + p3) * t3
+local arcLengthAttribute: string = 'ARC_LENGTH'
+
+local collisionFidelity: Enum.CollisionFidelity = Enum.CollisionFidelity.PreciseConvexDecomposition
+local terrainYieldEvery: number = 400
+
+local EPSILON: number = 1e-4
+local UP: Vector3 = Vector3.new(0, 1, 0)
+
+local function flatten(v: Vector3): Vector3
+  return Vector3.new(v.X, 0, v.Z)
+end
+
+local function unitOrZero(v: Vector3): Vector3
+  return if v.Magnitude > EPSILON then v.Unit else Vector3.new()
+end
+
+local function travelDirection(point: Types.Point, chord: Vector3): Vector3?
+  local direction: Vector3? = point.Direction
+  if direction == nil then return nil end
+
+  local flat: Vector3 = flatten(direction)
+  if flat.Magnitude < EPSILON then return nil end
+  flat = flat.Unit
+
+  if chord.Magnitude > EPSILON and flat:Dot(chord) < 0 then flat = -flat end
+  return flat
+end
+
+-- Average of the directions into and out of knot j
+local function chordAt(knots: { Vector3 }, j: number): Vector3
+  local incoming: Vector3 = if j > 1 then unitOrZero(flatten(knots[j] - knots[j - 1])) else Vector3.new()
+  local outgoing: Vector3 = if j < #knots then unitOrZero(flatten(knots[j + 1] - knots[j])) else Vector3.new()
+  return incoming + outgoing
+end
+
+local function buildFrames(stations: { Vector3 }, startDirection: Vector3?, endDirection: Vector3?): { CFrame }
+  local count: number = #stations
+  local frames: { CFrame } = table.create(count)
+  local lastDirection: Vector3 = unitOrZero(flatten(stations[math.min(2, count)] - stations[1]))
+  if lastDirection.Magnitude < EPSILON then lastDirection = Vector3.new(0, 0, 1) end
+
+  for i = 1, count do
+    local behind: Vector3 = stations[math.max(i - 1, 1)]
+    local ahead: Vector3 = stations[math.min(i + 1, count)]
+    local direction: Vector3 = unitOrZero(flatten(ahead - behind))
+    if direction.Magnitude < EPSILON then direction = lastDirection end
+    lastDirection = direction
+    frames[i] = CFrame.lookAt(stations[i], stations[i] + direction, UP)
+  end
+
+  if startDirection ~= nil then
+    frames[1] = CFrame.lookAt(stations[1], stations[1] + startDirection, UP)
+  end
+  if endDirection ~= nil then
+    frames[count] = CFrame.lookAt(stations[count], stations[count] + endDirection, UP)
+  end
+
+  return frames
+end
+
+local function turnAt(stations: { Vector3 }, i: number): (number, number)
+  if i <= 1 or i >= #stations then return 0, 0 end
+
+  local p0: Vector3, p1: Vector3, p2: Vector3 = stations[i - 1], stations[i], stations[i + 1]
+  local ax: number, az: number = p1.X - p0.X, p1.Z - p0.Z
+  local bx: number, bz: number = p2.X - p1.X, p2.Z - p1.Z
+  local cx: number, cz: number = p2.X - p0.X, p2.Z - p0.Z
+
+  local a: number = math.sqrt(ax * ax + az * az)
+  local b: number = math.sqrt(bx * bx + bz * bz)
+  local c: number = math.sqrt(cx * cx + cz * cz)
+  if a < EPSILON or b < EPSILON or c < EPSILON then return 0, 0 end
+
+  local cross: number = ax * bz - az * bx
+  local curvature: number = 2 * math.abs(cross) / (a * b * c)
+
+  return curvature, if cross > 0 then 1 elseif cross < 0 then -1 else 0
+end
+
+local function feather(values: { number }, radius: number): { number }
+  local count: number = #values
+
+  local eroded: { number } = table.create(count)
+  for i = 1, count do
+    local lowest: number = values[i]
+    for k = math.max(1, i - radius), math.min(count, i + radius) do
+      lowest = math.min(lowest, values[k])
+    end
+    eroded[i] = lowest
+  end
+
+  local blurred: { number } = table.create(count)
+  for i = 1, count do
+    local sum: number, taken: number = 0, 0
+    for k = math.max(1, i - radius), math.min(count, i + radius) do
+      sum += eroded[k]
+      taken += 1
+    end
+    blurred[i] = sum / taken
+  end
+
+  return blurred
+end
+
+local function edgeHalfWidths(stations: { Vector3 }): ({ number }, { number })
+  local count: number = #stations
+  local half: number = trackWidth / 2
+  local floor: number = half * minWidthFraction
+
+  local left: { number } = table.create(count)
+  local right: { number } = table.create(count)
+  local narrowed: boolean = false
+
+  for i = 1, count do
+    local curvature: number, side: number = turnAt(stations, i)
+    local inner: number = half
+    if curvature > EPSILON then
+      inner = math.clamp(foldSafety / curvature, floor, half)
+    end
+    if inner < half then narrowed = true end
+
+    left[i] = if side < 0 then inner else half
+    right[i] = if side > 0 then inner else half
+  end
+
+  if narrowed then
+    local radius: number = math.max(1, math.ceil(half / stationSpacing))
+    left = feather(left, radius)
+    right = feather(right, radius)
+  end
+
+  return left, right
+end
+
+local function sweepSolid(mesh: EditableMesh, profiles: { { Vector3 } }): ()
+  local count: number = #profiles
+  local ids: { { number } } = table.create(count)
+  for i = 1, count do
+    local corners: { Vector3 } = profiles[i]
+    ids[i] = {
+      mesh:AddVertex(corners[1]),
+      mesh:AddVertex(corners[2]),
+      mesh:AddVertex(corners[3]),
+      mesh:AddVertex(corners[4]),
+    }
+  end
+
+  for i = 2, count do
+    local back: { number }, front: { number } = ids[i - 1], ids[i]
+    for k = 1, 4 do
+      local n: number = (k % 4) + 1
+      mesh:AddTriangle(back[k], front[k], front[n])
+      mesh:AddTriangle(back[k], front[n], back[n])
+    end
+  end
+
+  local first: { number }, last: { number } = ids[1], ids[count]
+  mesh:AddTriangle(first[1], first[2], first[3])
+  mesh:AddTriangle(first[1], first[3], first[4])
+  mesh:AddTriangle(last[1], last[3], last[2])
+  mesh:AddTriangle(last[1], last[4], last[3])
+end
+
+local function createSolid(profiles: { { Vector3 } }, origin: CFrame, name: string, parent: Instance): MeshPart
+  local mesh: EditableMesh = AssetService:CreateEditableMesh()
+  sweepSolid(mesh, profiles)
+
+  local part: MeshPart = AssetService:CreateMeshPartAsync(Content.fromObject(mesh), {
+    CollisionFidelity = collisionFidelity
+  })
+  mesh:Destroy()
+
+  part.CFrame = origin
+  part.Anchored = true
+  part.Name = name
+  part.Parent = parent
+  return part
+end
+
+local function carveTerrain(frames: { CFrame }, stations: { Vector3 }): ()
+  local count: number = #stations
+  local spans: { number } = table.create(count)
+  for i = 1, count do
+    local ahead: number = if i < count then (stations[i + 1] - stations[i]).Magnitude else 0
+    local behind: number = if i > 1 then (stations[i] - stations[i - 1]).Magnitude else 0
+    spans[i] = math.max(ahead, behind, 1)
+  end
+
+  for i = 1, count do
+    Terrain:FillBlock(
+      frames[i] * CFrame.new(0, -13, 0),
+      Vector3.new(trackWidth + 4, 27, spans[i] + 2),
+      Enum.Material.Asphalt
     )
+    if i % terrainYieldEvery == 0 then task.wait() end
+  end
+
+  for i = 1, count do
+    Terrain:FillBlock(
+      frames[i] * CFrame.new(0, 13 + wallHeight / 2, 0),
+      Vector3.new(trackWidth + 6, wallHeight + 36, spans[i] + 4),
+      Enum.Material.Air
+    )
+    if i % terrainYieldEvery == 0 then task.wait() end
+  end
 end
 
-local max = function (...: number): number
-  local args: { number } = {...}
-  local currentMax: number = -math.huge
-  for _, v in ipairs(args) do
-    if v > currentMax then currentMax = v end
+local function buildSection(
+  pathFolder: Folder,
+  frames: { CFrame },
+  leftWidths: { number },
+  rightWidths: { number },
+  from: number,
+  to: number
+): ()
+  local origin: CFrame = frames[from]
+  local up: Vector3 = origin:VectorToObjectSpace(UP)
+
+  local count: number = to - from + 1
+  local road: { { Vector3 } } = table.create(count)
+  local leftWall: { { Vector3 } } = table.create(count)
+  local rightWall: { { Vector3 } } = table.create(count)
+  local leftInvisiWall: { { Vector3 } } = table.create(count)
+  local rightInvisiWall: { { Vector3 } } = table.create(count)
+
+  for i = from, to do
+    local frame: CFrame = frames[i]
+    local right: Vector3 = origin:VectorToObjectSpace(frame.RightVector)
+    local leftEdge: Vector3 = origin:PointToObjectSpace(frame * Vector3.new(-leftWidths[i], 0, 0))
+    local rightEdge: Vector3 = origin:PointToObjectSpace(frame * Vector3.new(rightWidths[i], 0, 0))
+
+    local slot: number = i - from + 1
+    road[slot] = {
+      leftEdge,
+      leftEdge - roadThickness * up,
+      rightEdge - roadThickness * up,
+      rightEdge,
+    }
+
+    local leftOuter: Vector3 = leftEdge - wallThickness * right
+    leftWall[slot] = {
+      leftOuter + wallHeight * up,
+      leftOuter,
+      leftEdge,
+      leftEdge + wallHeight * up,
+    }
+
+    local rightOuter: Vector3 = rightEdge + wallThickness * right
+    rightWall[slot] = {
+      rightEdge + wallHeight * up,
+      rightEdge,
+      rightOuter,
+      rightOuter + wallHeight * up,
+    }
+
+    local leftInvisiInner: Vector3 = leftOuter
+    local leftInvisiOuter: Vector3 = leftInvisiInner - invisiWallThickness * right
+    leftInvisiWall[slot] = {
+      leftInvisiOuter + (invisiWallHeight / 2) * up,
+      leftInvisiOuter - (invisiWallHeight / 2) * up,
+      leftInvisiInner - (invisiWallHeight / 2) * up,
+      leftInvisiInner + (invisiWallHeight / 2) * up,
+    }
+
+    local rightInvisiInner: Vector3 = rightOuter
+    local rightInvisiOuter: Vector3 = rightInvisiInner + invisiWallThickness * right
+    rightInvisiWall[slot] = {
+      rightInvisiInner + (invisiWallHeight / 2) * up,
+      rightInvisiInner - (invisiWallHeight / 2) * up,
+      rightInvisiOuter - (invisiWallHeight / 2) * up,
+      rightInvisiOuter + (invisiWallHeight / 2) * up,
+    }
   end
-  return currentMax
+
+  local roadPart: MeshPart = createSolid(road, origin, "Road", pathFolder)
+  roadPart.Color = Color3.new(0.1, 0.1, 0.1)
+  roadPart:AddTag('ROAD')
+
+  local leftWallPart: MeshPart = createSolid(leftWall, origin, "LeftWall", pathFolder)
+  leftWallPart.Color = Color3.new(1, 1, 1)
+  leftWallPart:AddTag('WALL')
+
+  local rightWallPart: MeshPart = createSolid(rightWall, origin, "RightWall", pathFolder)
+  rightWallPart.Color = Color3.new(1, 1, 1)
+  rightWallPart:AddTag('WALL')
+
+  local leftInvisiWallPart: MeshPart = createSolid(leftInvisiWall, origin, "LeftInvisiWall", pathFolder)
+  leftInvisiWallPart.Transparency = 0.7
+  leftInvisiWallPart:AddTag('WALL')
+
+  local rightInvisiWallPart: MeshPart = createSolid(rightInvisiWall, origin, "RightInvisiWall", pathFolder)
+  rightInvisiWallPart.Transparency = 0.7
+  rightInvisiWallPart:AddTag('WALL')
 end
 
-local min = function (...: number): number
-  local args: { number } = {...}
-  local currentMin: number = math.huge
-  for _, v in ipairs(args) do
-    if v < currentMin then currentMin = v end
+local function splitIntoRuns(path: { Types.Point }): { { Types.Point } }
+  local runs: { { Types.Point } } = {}
+  local current: { Types.Point } = {}
+
+  for i: number, point: Types.Point in ipairs(path) do
+    table.insert(current, point)
+
+    local nextPoint: Types.Point? = path[i + 1]
+    if nextPoint == nil or point.Next == nextPoint then
+      if #current >= 2 then table.insert(runs, current) end
+      current = {}
+    end
   end
-  return currentMin
+
+  return runs
 end
 
 return function (path: { Types.Point }, pathFolder: Folder): ()
-  -- Checkpoints
-  local checkpointIndex = 0
-  local function createCheckpoint(cf)
-    local i = checkpointIndex
-    checkpointIndex += 1
-
-    local checkpointPart = Instance.new("Part")
-    checkpointPart.Name = tostring(i)
-    checkpointPart.Color = Color3.new(1, 1, 0)
-    checkpointPart.Material = Enum.Material.Neon
-    checkpointPart.Size = Vector3.new(20, 30, 2)
-    checkpointPart.CFrame = cf * CFrame.new(0, 0, 0)
-    checkpointPart.Anchored = true
-    checkpointPart.Transparency = 0.5
-    checkpointPart.CanCollide = false
-    checkpointPart.CanQuery = false
-    checkpointPart.CanTouch = false
-    checkpointPart.Parent = Checkpoints
+  local writeCheckpoint = FinalizerCommon.checkpointWriter()
+  local previousCheckpoint: Part? = nil
+  local function createCheckpoint(cframe: CFrame, roadDistance: number): ()
+    local checkpointPart: Part = writeCheckpoint(cframe)
+    if previousCheckpoint ~= nil then
+      previousCheckpoint:SetAttribute(arcLengthAttribute, roadDistance)
+    end
+    previousCheckpoint = checkpointPart
   end
 
-  -- Path generation
-  local prev_lPoint: CFrame? = nil
-  local prev_rPoint: CFrame? = nil
-  for i, curPoint: Types.Point in ipairs(path) do
-    local nextPoint: Types.Point? = if i ~= #path then path[i + 1] else nil
-    if curPoint.Next == nextPoint then -- Check if it's a skip connection (via structure)
-      prev_lPoint = nil
-      prev_rPoint = nil
-      continue
+  for _, run: { Types.Point } in ipairs(splitIntoRuns(path)) do
+    local knotCount: number = #run
+
+    local knots: { Vector3 } = table.create(knotCount)
+    for j: number, point: Types.Point in ipairs(run) do knots[j] = point.Position end
+
+    local directions: { Vector3? } = table.create(knotCount)
+    for j: number, point: Types.Point in ipairs(run) do
+      directions[j] = travelDirection(point, chordAt(knots, j))
     end
-    if nextPoint ~= nil then
-      local prv = if curPoint.Direction ~= nil then curPoint.Position - 400 * Vector3.new(curPoint.Direction.X, 0, curPoint.Direction.Z) elseif i - 1 >= 1 then path[i-1].Position else curPoint.Position
-      local a = curPoint.Position
-      local b = nextPoint.Position
-      local nxt = if nextPoint.Direction ~= nil then nextPoint.Position - 400 * Vector3.new(nextPoint.Direction.X, 0, nextPoint.Direction.Z) elseif i + 2 <= #path then path[i+2].Position else nextPoint.Position
 
-      local startCF = CFrame.lookAt(catmullRom(prv, a, b, nxt, 0), catmullRom(prv, a, b, nxt, 0.002))
-      if curPoint.Direction ~= nil then
-        startCF = CFrame.lookAt(curPoint.Position, curPoint.Position + curPoint.Direction, Vector3.new(0, 1, 0))
-      end
-      createCheckpoint(startCF)
-      local endCF = CFrame.lookAt(catmullRom(prv, a, b, nxt, 1), catmullRom(prv, a, b, nxt, 1.002))
-      if nextPoint.Direction ~= nil then
-        endCF = CFrame.lookAt(nextPoint.Position, nextPoint.Position - nextPoint.Direction, Vector3.new(0, 1, 0))
-        createCheckpoint(endCF)
-      end
+    local segments: { Spline.Segment } = table.create(knotCount - 1)
+    for j = 1, knotCount - 1 do
+      segments[j] = Spline.segment(
+        knots[j - 1], knots[j], knots[j + 1], knots[j + 2],
+        directions[j], directions[j + 1]
+      )
+    end
 
-      -- Probe the curve points
-      local probedPoints: { Vector3 } = {}
-      for t = 0, 1, 0.001 do table.insert(probedPoints, catmullRom(prv, a, b, nxt, t)) end
-      local t1 = #probedPoints
+    local stations: { Vector3 }, knotStations: { number } = Spline.resample(segments, stationSpacing, maxStationTurn)
+    local frames: { CFrame } = buildFrames(stations, directions[1], directions[knotCount])
+    local leftWidths: { number }, rightWidths: { number } = edgeHalfWidths(stations)
 
-      -- Probe few extra points
-      for t = 1.001, 1.01, 0.001 do table.insert(probedPoints, catmullRom(prv, a, b, nxt, t)) end
+    carveTerrain(frames, stations)
 
-      local localBoundingBoxSize: Vector3 = Vector3.new(trackWidth, 20, 1)
-      local localBoundingBoxOffset: Vector3 = Vector3.new(0, 10, 0)
+    -- Arc length from the first station up to each station
+    local travelled: { number } = Spline.arcLengths(stations)
 
-      local XYZtoXZ = function (v: Vector3, y: number): Vector3 return Vector3.new(v.X, y, v.Z) end
-      local all_lPoints: { Vector3? }, rev_all_lPoints: { Vector3? } = {}, {}
-      local all_rPoints: { Vector3? }, rev_all_rPoints: { Vector3? } = {}, {}
-      if prev_lPoint ~= nil then table.insert(all_lPoints, prev_lPoint.Position) end
-      if prev_rPoint ~= nil then table.insert(all_rPoints, prev_rPoint.Position) end
-      local first_rev_prev_lPoint: CFrame? = nil
-      local first_rev_prev_rPoint: CFrame? = nil
-      local rev_prev_lPoint: CFrame? = nil
-      local rev_prev_rPoint: CFrame? = nil
-      local all_cfs: { CFrame }, rev_all_cfs: { CFrame } = {}, {}
-      local step = 4
-      for ct = 1, t1, step do
-        local rct = t1 - ct + 1
-        -- Forward
-        if ct >= rct + step then break end
+    local lastCheckpointStation: number = knotStations[1]
+    local function checkpointAt(station: number): ()
+      createCheckpoint(frames[station], travelled[station] - travelled[lastCheckpointStation])
+      lastCheckpointStation = station
+    end
 
-        local y = probedPoints[ct].Y
-        local cf: CFrame = CFrame.lookAt(probedPoints[ct], XYZtoXZ(probedPoints[math.clamp(ct + 1, 1, #probedPoints)], y))
-        if ct == 1 then cf = startCF end
-        table.insert(all_cfs, cf)
-        
-        local lPoint = cf * CFrame.new(-localBoundingBoxSize.X / 2, 0, 0)
-        local rPoint = cf * CFrame.new(localBoundingBoxSize.X / 2, 0, 0)
-        if prev_lPoint ~= nil and prev_rPoint ~= nil then
-          -- Check if any is falling behind
-          local diffL = prev_lPoint:PointToObjectSpace(lPoint.Position).Z
-          local diffR = prev_rPoint:PointToObjectSpace(rPoint.Position).Z
-          if diffL > 0 then -- Left is falling behind, should create section with more right points
-            table.insert(all_rPoints, rPoint.Position)
-            prev_rPoint = rPoint
-            table.insert(all_lPoints, 0) -- Instead of nil so that # length works properly
-            -- Adjust last valid left point Y position
-            local lastValidId = #all_lPoints
-            while all_lPoints[lastValidId] == 0 do lastValidId -= 1 end
-            all_lPoints[lastValidId] = Vector3.new(
-              all_lPoints[lastValidId].X,
-              min(all_lPoints[lastValidId].Y, lPoint.Position.Y), -- (all_lPoints[lastValidId].Y * (#all_lPoints - lastValidId) + lPoint.Position.Y) / (#all_lPoints - lastValidId + 1),
-              all_lPoints[lastValidId].Z
-            )
-          elseif diffR > 0 then
-            table.insert(all_lPoints, lPoint.Position)
-            prev_lPoint = lPoint
-            table.insert(all_rPoints, 0)
-            -- Adjust last valid right point Y position
-            local lastValidId = #all_rPoints
-            while all_rPoints[lastValidId] == 0 do lastValidId -= 1 end
-            all_rPoints[lastValidId] = Vector3.new(
-              all_rPoints[lastValidId].X,
-              min(all_rPoints[lastValidId].Y, rPoint.Position.Y), -- (all_rPoints[lastValidId].Y * (#all_rPoints - lastValidId) + rPoint.Position.Y) / (#all_rPoints - lastValidId + 1),
-              all_rPoints[lastValidId].Z
-            )
-          else
-            table.insert(all_lPoints, lPoint.Position)
-            table.insert(all_rPoints, rPoint.Position)
-            prev_lPoint = lPoint
-            prev_rPoint = rPoint
-          end
-        else
-          table.insert(all_lPoints, lPoint.Position)
-          table.insert(all_rPoints, rPoint.Position)
-          prev_lPoint = lPoint
-          prev_rPoint = rPoint
-        end
-
-        -- Backwards
-        if ct >= rct then break end
-        local rcf: CFrame = CFrame.lookAt(probedPoints[rct], XYZtoXZ(probedPoints[math.clamp(rct + 1, 1, #probedPoints)], probedPoints[rct].Y))
-        if rct == t1 then rcf = endCF end
-        table.insert(rev_all_cfs, rcf)
-        
-        local rev_lPoint = rcf * CFrame.new(-localBoundingBoxSize.X / 2, 0, 0)
-        local rev_rPoint = rcf * CFrame.new(localBoundingBoxSize.X / 2, 0, 0)
-        if rev_prev_lPoint ~= nil and rev_prev_rPoint ~= nil then
-          -- Check if any is falling behind
-          local diffL = rev_prev_lPoint:PointToObjectSpace(rev_lPoint.Position).Z
-          local diffR = rev_prev_rPoint:PointToObjectSpace(rev_rPoint.Position).Z
-          if diffL < 0 then -- Left is falling behind, should create section with more right points
-            table.insert(rev_all_rPoints, rev_rPoint.Position)
-            rev_prev_rPoint = rev_rPoint
-            table.insert(rev_all_lPoints, 0) -- Instead of nil so that # length works properly
-            -- Adjust last valid left point Y position
-            local lastValidId = #rev_all_lPoints
-            while rev_all_lPoints[lastValidId] == 0 do lastValidId -= 1 end
-            rev_all_lPoints[lastValidId] = Vector3.new(
-              rev_all_lPoints[lastValidId].X,
-              max(rev_all_lPoints[lastValidId].Y, rev_lPoint.Position.Y), -- (rev_all_lPoints[lastValidId].Y * (#rev_all_lPoints - lastValidId) + rev_lPoint.Position.Y) / (#rev_all_lPoints - lastValidId + 1),
-              rev_all_lPoints[lastValidId].Z
-            )
-          elseif diffR < 0 then
-            table.insert(rev_all_lPoints, rev_lPoint.Position)
-            rev_prev_lPoint = rev_lPoint
-            table.insert(rev_all_rPoints, 0)
-            -- Adjust last valid right point Y position
-            local lastValidId = #rev_all_rPoints
-            while rev_all_rPoints[lastValidId] == 0 do lastValidId -= 1 end
-            rev_all_rPoints[lastValidId] = Vector3.new(
-              rev_all_rPoints[lastValidId].X,
-              max(rev_all_rPoints[lastValidId].Y, rev_rPoint.Position.Y), -- (rev_all_rPoints[lastValidId].Y * (#rev_all_rPoints - lastValidId) + rev_rPoint.Position.Y) / (#rev_all_rPoints - lastValidId + 1),
-              rev_all_rPoints[lastValidId].Z
-            )
-          else
-            table.insert(rev_all_lPoints, rev_lPoint.Position)
-            table.insert(rev_all_rPoints, rev_rPoint.Position)
-            rev_prev_lPoint = rev_lPoint
-            rev_prev_rPoint = rev_rPoint
-          end
-        else
-          table.insert(rev_all_lPoints, rev_lPoint.Position)
-          table.insert(rev_all_rPoints, rev_rPoint.Position)
-          rev_prev_lPoint = rev_lPoint
-          rev_prev_rPoint = rev_rPoint
-          first_rev_prev_lPoint = rev_lPoint
-          first_rev_prev_rPoint = rev_rPoint
-        end
-      end
-      prev_lPoint = CFrame.new(rev_all_lPoints[1]) * CFrame.fromEulerAnglesYXZ(first_rev_prev_lPoint:ToEulerAnglesYXZ())
-      prev_rPoint = CFrame.new(rev_all_rPoints[1]) * CFrame.fromEulerAnglesYXZ(first_rev_prev_rPoint:ToEulerAnglesYXZ())
-      for j = #rev_all_cfs, 1, -1 do
-        table.insert(all_cfs, rev_all_cfs[j])
-        table.insert(all_lPoints, rev_all_lPoints[j])
-        table.insert(all_rPoints, rev_all_rPoints[j])
-      end
-      for _, cf in ipairs(all_cfs) do
-        Terrain:FillBlock(cf * CFrame.new(0, -13, 0), Vector3.new(localBoundingBoxSize.X, 0, localBoundingBoxOffset.Z) + Vector3.new(4, 27, 3), Enum.Material.Asphalt)
-      end
-      for _, cf in ipairs(all_cfs) do
-        Terrain:FillBlock(cf * CFrame.new(0, 13 + localBoundingBoxSize.Y / 2, 0), localBoundingBoxSize + Vector3.new(6, 36, 5), Enum.Material.Air)
-      end
-
-      -- Fix all points to startCF
-      local allPoints = #all_lPoints
-      for j = 1, allPoints do
-        if all_lPoints[j] ~= 0 then
-          all_lPoints[j] = startCF:PointToObjectSpace(all_lPoints[j])
-        else
-          all_lPoints[j] = nil
-        end
-        if all_rPoints[j] ~= 0 then
-          all_rPoints[j] = startCF:PointToObjectSpace(all_rPoints[j])
-        else
-          all_rPoints[j] = nil
-        end
-      end
-      local localUpVector = startCF:PointToObjectSpace(startCF.Position + Vector3.new(0, 1, 0))
-
-      local WallHeight: number = localBoundingBoxSize.Y
-
-      local roadMesh: EditableMesh = AssetService:CreateEditableMesh()
-      local leftWallMesh: EditableMesh = AssetService:CreateEditableMesh()
-      local rightWallMesh: EditableMesh = AssetService:CreateEditableMesh()
-      local leftInvisiWallMesh: EditableMesh = AssetService:CreateEditableMesh()
-      local rightInvisiWallMesh: EditableMesh = AssetService:CreateEditableMesh()
-
-      local lastLPoint = all_lPoints[1]
-      local lastLPointRoadVertex = roadMesh:AddVertex(lastLPoint)
-      local lastLBPointWallVertex = leftWallMesh:AddVertex(lastLPoint)
-      local lastLTPointWallVertex = leftWallMesh:AddVertex(lastLPoint + WallHeight * localUpVector)
-      local lastLBPointInvisiWallVertex = leftInvisiWallMesh:AddVertex(lastLPoint - (invisiWallHeight / 2 * localUpVector))
-      local lastLTPointInvisiWallVertex = leftInvisiWallMesh:AddVertex(lastLPoint + (invisiWallHeight / 2 * localUpVector))
-      
-      local lastRPoint = all_rPoints[1]
-      local lastRPointRoadVertex = roadMesh:AddVertex(lastRPoint)
-      local lastRBPointWallVertex = rightWallMesh:AddVertex(lastRPoint)
-      local lastRTPointWallVertex = rightWallMesh:AddVertex(lastRPoint + WallHeight * localUpVector)
-      local lastRBPointInvisiWallVertex = rightInvisiWallMesh:AddVertex(lastRPoint - (invisiWallHeight / 2 * localUpVector))
-      local lastRTPointInvisiWallVertex = rightInvisiWallMesh:AddVertex(lastRPoint + (invisiWallHeight / 2 * localUpVector))
-
-      for j = 2, allPoints do
-        local isLast = j == allPoints
-        local lPoint = all_lPoints[j]
-        local rPoint = all_rPoints[j]
-
-        -- Left wall
-        if lPoint ~= nil then
-          local lbPointWallVertex = leftWallMesh:AddVertex(lPoint)
-          local ltPointWallVertex = leftWallMesh:AddVertex(lPoint + WallHeight * localUpVector)
-          local lbPointInvisiWallVertex = leftInvisiWallMesh:AddVertex(lPoint - (invisiWallHeight / 2 * localUpVector))
-          local ltPointInvisiWallVertex = leftInvisiWallMesh:AddVertex(lPoint + (invisiWallHeight / 2 * localUpVector))
-
-          -- Inner
-          leftWallMesh:AddTriangle(lastLBPointWallVertex, lbPointWallVertex, ltPointWallVertex)
-          leftWallMesh:AddTriangle(lastLBPointWallVertex, ltPointWallVertex, lastLTPointWallVertex)
-          leftInvisiWallMesh:AddTriangle(lastLBPointInvisiWallVertex, lbPointInvisiWallVertex, ltPointInvisiWallVertex)
-          leftInvisiWallMesh:AddTriangle(lastLBPointInvisiWallVertex, ltPointInvisiWallVertex, lastLTPointInvisiWallVertex)
-          -- Outer
-          leftWallMesh:AddTriangle(lastLBPointWallVertex, ltPointWallVertex, lbPointWallVertex)
-          leftWallMesh:AddTriangle(lastLBPointWallVertex, lastLTPointWallVertex, ltPointWallVertex)
-          leftInvisiWallMesh:AddTriangle(lastLBPointInvisiWallVertex, ltPointInvisiWallVertex, lbPointInvisiWallVertex)
-          leftInvisiWallMesh:AddTriangle(lastLBPointInvisiWallVertex, lastLTPointInvisiWallVertex, ltPointInvisiWallVertex)
-
-          lastLBPointWallVertex = lbPointWallVertex
-          lastLTPointWallVertex = ltPointWallVertex
-          lastLBPointInvisiWallVertex = lbPointInvisiWallVertex
-          lastLTPointInvisiWallVertex = ltPointInvisiWallVertex
-        end
-
-        -- Right wall
-        if rPoint ~= nil then
-          local rbPointWallVertex = rightWallMesh:AddVertex(rPoint)
-          local rtPointWallVertex = rightWallMesh:AddVertex(rPoint + WallHeight * localUpVector)
-          local rbPointInvisiWallVertex = rightInvisiWallMesh:AddVertex(rPoint - (invisiWallHeight / 2 * localUpVector))
-          local rtPointInvisiWallVertex = rightInvisiWallMesh:AddVertex(rPoint + (invisiWallHeight / 2 * localUpVector))
-
-          -- Inner
-          rightWallMesh:AddTriangle(lastRBPointWallVertex, rtPointWallVertex, rbPointWallVertex)
-          rightWallMesh:AddTriangle(lastRBPointWallVertex, lastRTPointWallVertex, rtPointWallVertex)
-          rightInvisiWallMesh:AddTriangle(lastRBPointInvisiWallVertex, rtPointInvisiWallVertex, rbPointInvisiWallVertex)
-          rightInvisiWallMesh:AddTriangle(lastRBPointInvisiWallVertex, lastRTPointInvisiWallVertex, rtPointInvisiWallVertex)
-          -- Outer
-          rightWallMesh:AddTriangle(lastRBPointWallVertex, rbPointWallVertex, rtPointWallVertex)
-          rightWallMesh:AddTriangle(lastRBPointWallVertex, rtPointWallVertex, lastRTPointWallVertex)
-          rightInvisiWallMesh:AddTriangle(lastRBPointInvisiWallVertex, rbPointInvisiWallVertex, rtPointInvisiWallVertex)
-          rightInvisiWallMesh:AddTriangle(lastRBPointInvisiWallVertex, rtPointInvisiWallVertex, lastRTPointInvisiWallVertex)
-
-          lastRBPointWallVertex = rbPointWallVertex
-          lastRTPointWallVertex = rtPointWallVertex
-          lastRBPointInvisiWallVertex = rbPointInvisiWallVertex
-          lastRTPointInvisiWallVertex = rtPointInvisiWallVertex
-        end
-
-        -- Road
-        if lPoint ~= nil and rPoint ~= nil then
-          local final_lPoint = lPoint
-          local final_rPoint = rPoint
-          if isLast then
-            final_lPoint = final_lPoint + 0.05 * localUpVector
-            final_rPoint = final_rPoint + 0.05 * localUpVector
-          end
-          local lPointRoadVertex = roadMesh:AddVertex(final_lPoint)
-          local rPointRoadVertex = roadMesh:AddVertex(final_rPoint)
-
-          roadMesh:AddTriangle(lastLPointRoadVertex, rPointRoadVertex, lPointRoadVertex)
-          roadMesh:AddTriangle(lastLPointRoadVertex, lastRPointRoadVertex, rPointRoadVertex)
-
-          lastLPoint = lPoint
-          lastLPointRoadVertex = lPointRoadVertex
-          lastRPoint = rPoint
-          lastRPointRoadVertex = rPointRoadVertex
-        elseif lPoint ~= nil then
-          local lPointRoadVertex = roadMesh:AddVertex(lPoint)
-          roadMesh:AddTriangle(lastLPointRoadVertex, lastRPointRoadVertex, lPointRoadVertex)
-          lastLPoint = lPoint
-          lastLPointRoadVertex = lPointRoadVertex
-        elseif rPoint ~= nil then
-          local rPointRoadVertex = roadMesh:AddVertex(rPoint)
-          roadMesh:AddTriangle(lastLPointRoadVertex, lastRPointRoadVertex, rPointRoadVertex)
-          lastRPoint = rPoint
-          lastRPointRoadVertex = rPointRoadVertex
-        end
-      end
-
-      local roadPart = AssetService:CreateMeshPartAsync(Content.fromObject(roadMesh))
-      roadPart.CFrame = startCF
-      roadPart.Anchored = true
-      roadPart.Parent = pathFolder
-      roadPart.Name = "Road"
-      roadPart.Color = Color3.new(0.1, 0.1, 0.1)
-      roadPart:AddTag('ROAD')
-
-      local leftWallPart = AssetService:CreateMeshPartAsync(Content.fromObject(leftWallMesh))
-      leftWallPart.CFrame = startCF
-      leftWallPart.Anchored = true
-      leftWallPart.Parent = pathFolder
-      leftWallPart.Name = "LeftWall"
-      leftWallPart.Color = Color3.new(1, 1, 1)
-      leftWallPart:AddTag('WALL')
-
-      local rightWallPart = AssetService:CreateMeshPartAsync(Content.fromObject(rightWallMesh))
-      rightWallPart.CFrame = startCF
-      rightWallPart.Anchored = true
-      rightWallPart.Parent = pathFolder
-      rightWallPart.Name = "RightWall"
-      rightWallPart.Color = Color3.new(1, 1, 1)
-      rightWallPart:AddTag('WALL')
-
-      -- Invisible walls
-      local leftInvisiWallPart = AssetService:CreateMeshPartAsync(Content.fromObject(leftInvisiWallMesh))
-      leftInvisiWallPart.CFrame = startCF
-      leftInvisiWallPart.Anchored = true
-      leftInvisiWallPart.Parent = pathFolder
-      leftInvisiWallPart.Name = "LeftInvisiWall"
-      leftInvisiWallPart.Transparency = 0.7
-      leftInvisiWallPart:AddTag('WALL')
-
-      local rightInvisiWallPart = AssetService:CreateMeshPartAsync(Content.fromObject(rightInvisiWallMesh))
-      rightInvisiWallPart.CFrame = startCF
-      rightInvisiWallPart.Anchored = true
-      rightInvisiWallPart.Parent = pathFolder
-      rightInvisiWallPart.Name = "RightInvisiWall"
-      rightInvisiWallPart.Transparency = 0.7
-      rightInvisiWallPart:AddTag('WALL')
+    for j = 1, knotCount - 1 do
+      checkpointAt(knotStations[j])
+      if run[j + 1].Direction ~= nil then checkpointAt(knotStations[j + 1]) end
+      buildSection(pathFolder, frames, leftWidths, rightWidths, knotStations[j], knotStations[j + 1])
     end
   end
 end

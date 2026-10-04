@@ -1,57 +1,56 @@
 --!strict
 
 local Types = require(script.Parent.Parent:WaitForChild("types"))
+local FinalizerCommon = require(script.Parent.Parent:WaitForChild("FinalizerCommon"))
 
 local AssetService = game:GetService('AssetService')
+local ServerScriptService = game:GetService('ServerScriptService')
 
 local Workspace = game:GetService('Workspace')
-local Terrain = Workspace:WaitForChild('Terrain')
+local Terrain: Terrain = Workspace.Terrain
 
-local Checkpoints = Instance.new("Folder")
-Checkpoints.Name = "Checkpoints"
-Checkpoints.Parent = Workspace
+local Spline = require(ServerScriptService:WaitForChild('Utilities'):WaitForChild('Spline'))
 
+local probeSpacing: number = 0.5
 
-local function catmullRom(p0: Vector3, p1: Vector3, p2: Vector3, p3: Vector3, t: number)
-    local t2: number = t * t
-    local t3: number = t2 * t
-    return 0.5 * (
-        (2 * p1) +
-        (-p0 + p2) * t +
-        (2*p0 - 5*p1 + 4*p2 - p3) * t2 +
-        (-p0 + 3*p1 - 3*p2 + p3) * t3
-    )
+local UP: Vector3 = Vector3.new(0, 1, 0)
+local levelLook = FinalizerCommon.levelLook
+
+local function createProbePart(size: Vector3, cframe: CFrame): BasePart
+  local part: Part = Instance.new('Part')
+  part.Size = size
+  part.Anchored = true
+  part.CFrame = cframe
+  part.Transparency = 1
+  part.CanCollide = false
+  part.CanTouch = false
+  part.Parent = Workspace
+  return part
 end
 
-local max = function (...: number): number
-  local args: { number } = {...}
-  local currentMax: number = -math.huge
-  for _, v in ipairs(args) do
-    if v > currentMax then currentMax = v end
-  end
-  return currentMax
+local function overlapsVolume(volume: BasePart, cframe: CFrame, size: Vector3): boolean
+  local overlapParams: OverlapParams = OverlapParams.new()
+  overlapParams.FilterType = Enum.RaycastFilterType.Include
+  overlapParams.FilterDescendantsInstances = { volume }
+  overlapParams.MaxParts = 1
+
+  return #Workspace:GetPartBoundsInBox(cframe, size, overlapParams) > 0
+end
+
+local function placeMesh(mesh: EditableMesh, origin: CFrame, name: string, color: Color3, tag: string, parent: Instance): ()
+  local part: MeshPart = AssetService:CreateMeshPartAsync(Content.fromObject(mesh))
+  mesh:Destroy()
+
+  part.CFrame = origin
+  part.Anchored = true
+  part.Name = name
+  part.Color = color
+  part:AddTag(tag)
+  part.Parent = parent
 end
 
 return function (path: { Types.Point }, pathFolder: Folder): ()
-  -- Checkpoints
-  local checkpointIndex = 0
-  local function createCheckpoint(cf)
-    local i = checkpointIndex
-    checkpointIndex += 1
-
-    local checkpointPart = Instance.new("Part")
-    checkpointPart.Name = tostring(i)
-    checkpointPart.Color = Color3.new(1, 1, 0)
-    checkpointPart.Material = Enum.Material.Neon
-    checkpointPart.Size = Vector3.new(20, 30, 2)
-    checkpointPart.CFrame = cf * CFrame.new(0, 0, 0)
-    checkpointPart.Anchored = true
-    checkpointPart.Transparency = 0.5
-    checkpointPart.CanCollide = false
-    checkpointPart.CanQuery = false
-    checkpointPart.CanTouch = false
-    checkpointPart.Parent = Checkpoints
-  end
+  local createCheckpoint = FinalizerCommon.checkpointWriter()
 
   -- Path generation
   for i, curPoint: Types.Point in ipairs(path) do
@@ -60,236 +59,177 @@ return function (path: { Types.Point }, pathFolder: Folder): ()
       continue
     end
     if nextPoint ~= nil then
-      local prv = if curPoint.Direction ~= nil then curPoint.Position - 400 * Vector3.new(curPoint.Direction.X, 0, curPoint.Direction.Z) elseif i - 1 >= 1 then path[i-1].Position else curPoint.Position
-      local a = curPoint.Position
-      local b = nextPoint.Position
-      local nxt = if nextPoint.Direction ~= nil then nextPoint.Position - 400 * Vector3.new(nextPoint.Direction.X, 0, nextPoint.Direction.Z) elseif i + 2 <= #path then path[i+2].Position else nextPoint.Position
+      local span: FinalizerCommon.Span = FinalizerCommon.span(path, i, levelLook)
+      local segment: Spline.Segment = span.Segment
+      local startCF: CFrame = span.StartCFrame
+      local endCF: CFrame = span.EndCFrame
 
-      local startCF = CFrame.lookAt(catmullRom(prv, a, b, nxt, 0), catmullRom(prv, a, b, nxt, 0.002))
-      if curPoint.Direction ~= nil then
-        startCF = CFrame.lookAt(curPoint.Position, curPoint.Position + curPoint.Direction, Vector3.new(0, 1, 0))
-      end
       createCheckpoint(startCF)
-      local endCF = CFrame.lookAt(catmullRom(prv, a, b, nxt, 1), catmullRom(prv, a, b, nxt, 1.002))
-      if nextPoint.Direction ~= nil then
-        endCF = CFrame.lookAt(nextPoint.Position, nextPoint.Position - nextPoint.Direction, Vector3.new(0, 1, 0))
-        createCheckpoint(endCF)
-      end
-
-      -- Probe the curve points
-      local probedPoints: { Vector3 } = {}
-      for t = 0, 1, 0.001 do table.insert(probedPoints, catmullRom(prv, a, b, nxt, t)) end
-      local t1 = #probedPoints
-
-      -- Probe few extra points
-      for t = 1.001, 1.01, 0.001 do table.insert(probedPoints, catmullRom(prv, a, b, nxt, t)) end
+      if span.EndTangent ~= nil then createCheckpoint(endCF) end
 
       local localBoundingBoxSize: Vector3 = Vector3.new(49, 20, 1)
       local localBoundingBoxOffset: Vector3 = Vector3.new(0, 10, 0)
+      local halfWidth: number = localBoundingBoxSize.X / 2
 
-      local all_lPoints: { Vector3? }, rev_all_lPoints: { Vector3? } = {}, {}
-      local all_rPoints: { Vector3? }, rev_all_rPoints: { Vector3? } = {}, {}
-      table.insert(all_lPoints, (startCF * CFrame.new(-localBoundingBoxSize.X / 2, 0, 0)).Position)
-      table.insert(all_rPoints, (startCF * CFrame.new(localBoundingBoxSize.X / 2, 0, 0)).Position)
-      table.insert(rev_all_lPoints, (endCF * CFrame.new(-localBoundingBoxSize.X / 2, 0, 0)).Position)
-      table.insert(rev_all_rPoints, (endCF * CFrame.new(localBoundingBoxSize.X / 2, 0, 0)).Position)
+      local probedPoints: { Vector3 }, t1: number = Spline.sampleSegment(segment, probeSpacing, 4)
+
+      local function frameAt(index: number): CFrame
+        local ahead: Vector3 = probedPoints[math.clamp(index + 1, 1, #probedPoints)]
+        return levelLook(probedPoints[index], ahead)
+      end
+
+      local all_lPoints: { Vector3 }, rev_all_lPoints: { Vector3 } = {}, {}
+      local all_rPoints: { Vector3 }, rev_all_rPoints: { Vector3 } = {}, {}
+      local all_cfs: { CFrame }, rev_all_cfs: { CFrame } = { startCF }, { endCF }
+      table.insert(all_lPoints, (startCF * CFrame.new(-halfWidth, 0, 0)).Position)
+      table.insert(all_rPoints, (startCF * CFrame.new(halfWidth, 0, 0)).Position)
+      table.insert(rev_all_lPoints, (endCF * CFrame.new(-halfWidth, 0, 0)).Position)
+      table.insert(rev_all_rPoints, (endCF * CFrame.new(halfWidth, 0, 0)).Position)
+
       local runningPositionNow: CFrame = startCF
       local reverseRunningPositionNow: CFrame = endCF
       local ct: number = 0
       local rct: number = t1
-      local all_cfs: { CFrame }, rev_all_cfs: { CFrame } = { startCF }, { endCF }
-      while true do
-        -- Find the start point
-        local lastPart = Instance.new('Part')
-        lastPart.Size = localBoundingBoxSize
-        lastPart.Anchored = true
-        lastPart.CFrame = runningPositionNow * CFrame.new(localBoundingBoxOffset)
-        lastPart.Transparency = 0.5
-        lastPart.Parent = Workspace
 
-        local cf: CFrame? = nil
-        while true do 
+      while true do
+        -- Walk forward until the next section clears the previous one
+        local forwardVolume: BasePart = createProbePart(
+          localBoundingBoxSize,
+          runningPositionNow * CFrame.new(localBoundingBoxOffset)
+        )
+        local forwardCF: CFrame? = nil
+        while true do
           ct += 1
           if ct >= rct then break end -- Reached the boundary
-          cf = CFrame.lookAt(probedPoints[ct], probedPoints[math.clamp(ct + 1, 1, #probedPoints)])
-          
-          local overlapParams = OverlapParams.new()
-          overlapParams.FilterType = Enum.RaycastFilterType.Include
-          overlapParams.FilterDescendantsInstances = { lastPart }
-          overlapParams.MaxParts = 1
-
-          local parts = Workspace:GetPartBoundsInBox(cf * CFrame.new(localBoundingBoxOffset), localBoundingBoxSize, overlapParams)
-          if #parts == 0 then break end
+          local candidate: CFrame = frameAt(ct)
+          if not overlapsVolume(forwardVolume, candidate * CFrame.new(localBoundingBoxOffset), localBoundingBoxSize) then
+            forwardCF = candidate
+            break
+          end
         end
-        lastPart:Destroy()
-        if ct >= rct then break end -- Reached the boundary
+        forwardVolume:Destroy()
+        if ct >= rct or forwardCF == nil then break end -- Reached the boundary
 
-        local lPoint = cf * CFrame.new(-localBoundingBoxSize.X / 2, 0, 0)
-        local rPoint = cf * CFrame.new(localBoundingBoxSize.X / 2, 0, 0)
-        table.insert(all_lPoints, lPoint.Position)
-        table.insert(all_rPoints, rPoint.Position)
-        runningPositionNow = cf
+        table.insert(all_cfs, forwardCF)
+        table.insert(all_lPoints, (forwardCF * CFrame.new(-halfWidth, 0, 0)).Position)
+        table.insert(all_rPoints, (forwardCF * CFrame.new(halfWidth, 0, 0)).Position)
+        runningPositionNow = forwardCF
 
         -- Find the reverse point
-        lastPart = Instance.new('Part')
-        lastPart.Size = localBoundingBoxSize
-        lastPart.Anchored = true
-        lastPart.CFrame = reverseRunningPositionNow * CFrame.new(localBoundingBoxOffset)
-        lastPart.Transparency = 0.5
-        lastPart.Parent = Workspace
-
-        cf = nil
-        while true do 
+        local reverseVolume: BasePart = createProbePart(
+          localBoundingBoxSize,
+          reverseRunningPositionNow * CFrame.new(localBoundingBoxOffset)
+        )
+        local reverseCF: CFrame? = nil
+        while true do
           rct -= 1
           if ct >= rct then break end -- Reached the boundary
-          cf = CFrame.lookAt(probedPoints[rct], probedPoints[math.clamp(rct + 1, 1, #probedPoints)])
-          
-          local overlapParams = OverlapParams.new()
-          overlapParams.FilterType = Enum.RaycastFilterType.Include
-          overlapParams.FilterDescendantsInstances = { lastPart }
-          overlapParams.MaxParts = 1
-
-          local parts = Workspace:GetPartBoundsInBox(cf * CFrame.new(localBoundingBoxOffset), localBoundingBoxSize, overlapParams)
-          if #parts == 0 then break end
+          local candidate: CFrame = frameAt(rct)
+          if not overlapsVolume(reverseVolume, candidate * CFrame.new(localBoundingBoxOffset), localBoundingBoxSize) then
+            reverseCF = candidate
+            break
+          end
         end
-        lastPart:Destroy()
-        if ct >= rct then break end -- Reached the boundary
+        reverseVolume:Destroy()
+        if ct >= rct or reverseCF == nil then break end -- Reached the boundary
 
-        lPoint = cf * CFrame.new(-localBoundingBoxSize.X / 2, 0, 0)
-        rPoint = cf * CFrame.new(localBoundingBoxSize.X / 2, 0, 0)
-        table.insert(rev_all_lPoints, lPoint.Position)
-        table.insert(rev_all_rPoints, rPoint.Position)
+        table.insert(rev_all_cfs, reverseCF)
+        table.insert(rev_all_lPoints, (reverseCF * CFrame.new(-halfWidth, 0, 0)).Position)
+        table.insert(rev_all_rPoints, (reverseCF * CFrame.new(halfWidth, 0, 0)).Position)
+        reverseRunningPositionNow = reverseCF
       end
 
-      for i = #rev_all_cfs, 1, -1 do
-        table.insert(all_cfs, rev_all_cfs[i])
-        table.insert(all_lPoints, rev_all_lPoints[i])
-        table.insert(all_rPoints, rev_all_rPoints[i])
+      -- The reverse walk collected end -> middle, so replay it middle -> end.
+      for j = #rev_all_cfs, 1, -1 do
+        table.insert(all_cfs, rev_all_cfs[j])
+        table.insert(all_lPoints, rev_all_lPoints[j])
+        table.insert(all_rPoints, rev_all_rPoints[j])
       end
-      for cct = 1, t1 do
-        local cf: CFrame = CFrame.lookAt(probedPoints[cct], probedPoints[math.clamp(cct + 1, 1, #probedPoints)])
-        Terrain:FillBlock(cf * CFrame.new(0, -13, 0), Vector3.new(localBoundingBoxSize.X, 0, localBoundingBoxOffset.Z) + Vector3.new(4, 27, 3), Enum.Material.Asphalt)
+
+      local sectionSpan: number = localBoundingBoxSize.Z + 3
+      for _, cf: CFrame in ipairs(all_cfs) do
+        Terrain:FillBlock(
+          cf * CFrame.new(0, -13, 0),
+          Vector3.new(localBoundingBoxSize.X + 4, 27, sectionSpan),
+          Enum.Material.Asphalt
+        )
       end
-      for cct = 1, t1 do
-        local cf: CFrame = CFrame.lookAt(probedPoints[cct], probedPoints[math.clamp(cct + 1, 1, #probedPoints)])
-        Terrain:FillBlock(cf * CFrame.new(0, 13 + localBoundingBoxSize.Y / 2, 0), localBoundingBoxSize + Vector3.new(6, 36, 5), Enum.Material.Air)
+      for _, cf: CFrame in ipairs(all_cfs) do
+        Terrain:FillBlock(
+          cf * CFrame.new(0, 13 + localBoundingBoxSize.Y / 2, 0),
+          Vector3.new(localBoundingBoxSize.X + 6, localBoundingBoxSize.Y + 36, sectionSpan + 2),
+          Enum.Material.Air
+        )
       end
 
       -- Fix all points to startCF
-      local allPoints = #all_lPoints
-      for i = 1, allPoints do
-        if all_lPoints[i] ~= 0 then
-          all_lPoints[i] = startCF:PointToObjectSpace(all_lPoints[i])
-        else
-          all_lPoints[i] = nil
-        end
-        if all_rPoints[i] ~= 0 then
-          all_rPoints[i] = startCF:PointToObjectSpace(all_rPoints[i])
-        else
-          all_rPoints[i] = nil
-        end
+      local allPoints: number = #all_lPoints
+      for j = 1, allPoints do
+        all_lPoints[j] = startCF:PointToObjectSpace(all_lPoints[j])
+        all_rPoints[j] = startCF:PointToObjectSpace(all_rPoints[j])
       end
 
       local WallSize: number = localBoundingBoxSize.Y
+      local localUp: Vector3 = startCF:VectorToObjectSpace(UP)
 
       local roadMesh: EditableMesh = AssetService:CreateEditableMesh()
       local leftWallMesh: EditableMesh = AssetService:CreateEditableMesh()
       local rightWallMesh: EditableMesh = AssetService:CreateEditableMesh()
 
-      local lastLPoint = all_lPoints[1]
-      local lastLPointRoadVertex = roadMesh:AddVertex(lastLPoint)
-      local lastLBPointWallVertex = leftWallMesh:AddVertex(lastLPoint)
-      local lastLTPointWallVertex = leftWallMesh:AddVertex(lastLPoint + Vector3.new(0, WallSize, 0))
-      
-      local lastRPoint = all_rPoints[1]
-      local lastRPointRoadVertex = roadMesh:AddVertex(lastRPoint)
-      local lastRBPointWallVertex = rightWallMesh:AddVertex(lastRPoint)
-      local lastRTPointWallVertex = rightWallMesh:AddVertex(lastRPoint + Vector3.new(0, WallSize, 0))
+      local lastLPointRoadVertex: number = roadMesh:AddVertex(all_lPoints[1])
+      local lastLBPointWallVertex: number = leftWallMesh:AddVertex(all_lPoints[1])
+      local lastLTPointWallVertex: number = leftWallMesh:AddVertex(all_lPoints[1] + WallSize * localUp)
 
-      for i = 2, allPoints do
-        local lPoint = all_lPoints[i]
-        local rPoint = all_rPoints[i]
+      local lastRPointRoadVertex: number = roadMesh:AddVertex(all_rPoints[1])
+      local lastRBPointWallVertex: number = rightWallMesh:AddVertex(all_rPoints[1])
+      local lastRTPointWallVertex: number = rightWallMesh:AddVertex(all_rPoints[1] + WallSize * localUp)
+
+      for j = 2, allPoints do
+        local lPoint: Vector3 = all_lPoints[j]
+        local rPoint: Vector3 = all_rPoints[j]
 
         -- Left wall
-        if lPoint ~= nil then
-          local lbPointWallVertex = leftWallMesh:AddVertex(lPoint)
-          local ltPointWallVertex = leftWallMesh:AddVertex(lPoint + Vector3.new(0, WallSize, 0))
+        local lbPointWallVertex: number = leftWallMesh:AddVertex(lPoint)
+        local ltPointWallVertex: number = leftWallMesh:AddVertex(lPoint + WallSize * localUp)
 
-          -- Inner
-          leftWallMesh:AddTriangle(lastLBPointWallVertex, lbPointWallVertex, ltPointWallVertex)
-          leftWallMesh:AddTriangle(lastLBPointWallVertex, ltPointWallVertex, lastLTPointWallVertex)
-          -- Outer
-          leftWallMesh:AddTriangle(lastLBPointWallVertex, ltPointWallVertex, lbPointWallVertex)
-          leftWallMesh:AddTriangle(lastLBPointWallVertex, lastLTPointWallVertex, ltPointWallVertex)
+        -- Inner
+        leftWallMesh:AddTriangle(lastLBPointWallVertex, lbPointWallVertex, ltPointWallVertex)
+        leftWallMesh:AddTriangle(lastLBPointWallVertex, ltPointWallVertex, lastLTPointWallVertex)
+        -- Outer
+        leftWallMesh:AddTriangle(lastLBPointWallVertex, ltPointWallVertex, lbPointWallVertex)
+        leftWallMesh:AddTriangle(lastLBPointWallVertex, lastLTPointWallVertex, ltPointWallVertex)
 
-          lastLBPointWallVertex = lbPointWallVertex
-          lastLTPointWallVertex = ltPointWallVertex
-        end
+        lastLBPointWallVertex = lbPointWallVertex
+        lastLTPointWallVertex = ltPointWallVertex
 
         -- Right wall
-        if rPoint ~= nil then
-          local rbPointWallVertex = rightWallMesh:AddVertex(rPoint)
-          local rtPointWallVertex = rightWallMesh:AddVertex(rPoint + Vector3.new(0, WallSize, 0))
+        local rbPointWallVertex: number = rightWallMesh:AddVertex(rPoint)
+        local rtPointWallVertex: number = rightWallMesh:AddVertex(rPoint + WallSize * localUp)
 
-          -- Inner
-          rightWallMesh:AddTriangle(lastRBPointWallVertex, rtPointWallVertex, rbPointWallVertex)
-          rightWallMesh:AddTriangle(lastRBPointWallVertex, lastRTPointWallVertex, rtPointWallVertex)
-          -- Outer
-          rightWallMesh:AddTriangle(lastRBPointWallVertex, rbPointWallVertex, rtPointWallVertex)
-          rightWallMesh:AddTriangle(lastRBPointWallVertex, rtPointWallVertex, lastRTPointWallVertex)
+        -- Inner
+        rightWallMesh:AddTriangle(lastRBPointWallVertex, rtPointWallVertex, rbPointWallVertex)
+        rightWallMesh:AddTriangle(lastRBPointWallVertex, lastRTPointWallVertex, rtPointWallVertex)
+        -- Outer
+        rightWallMesh:AddTriangle(lastRBPointWallVertex, rbPointWallVertex, rtPointWallVertex)
+        rightWallMesh:AddTriangle(lastRBPointWallVertex, rtPointWallVertex, lastRTPointWallVertex)
 
-          lastRBPointWallVertex = rbPointWallVertex
-          lastRTPointWallVertex = rtPointWallVertex
-        end
+        lastRBPointWallVertex = rbPointWallVertex
+        lastRTPointWallVertex = rtPointWallVertex
 
         -- Road
-        if lPoint ~= nil and rPoint ~= nil then
-          local lPointRoadVertex = roadMesh:AddVertex(lPoint)
-          local rPointRoadVertex = roadMesh:AddVertex(rPoint)
+        local lPointRoadVertex: number = roadMesh:AddVertex(lPoint)
+        local rPointRoadVertex: number = roadMesh:AddVertex(rPoint)
 
-          roadMesh:AddTriangle(lastLPointRoadVertex, rPointRoadVertex, lPointRoadVertex)
-          roadMesh:AddTriangle(lastLPointRoadVertex, lastRPointRoadVertex, rPointRoadVertex)
+        roadMesh:AddTriangle(lastLPointRoadVertex, rPointRoadVertex, lPointRoadVertex)
+        roadMesh:AddTriangle(lastLPointRoadVertex, lastRPointRoadVertex, rPointRoadVertex)
 
-          lastLPoint = lPoint
-          lastLPointRoadVertex = lPointRoadVertex
-          lastRPoint = rPoint
-          lastRPointRoadVertex = rPointRoadVertex
-        elseif lPoint ~= nil then
-          local lPointRoadVertex = roadMesh:AddVertex(lPoint)
-          roadMesh:AddTriangle(lastLPointRoadVertex, lastRPointRoadVertex, lPointRoadVertex)
-          lastLPoint = lPoint
-          lastLPointRoadVertex = lPointRoadVertex
-        elseif rPoint ~= nil then
-          local rPointRoadVertex = roadMesh:AddVertex(rPoint)
-          roadMesh:AddTriangle(lastLPointRoadVertex, lastRPointRoadVertex, rPointRoadVertex)
-          lastRPoint = rPoint
-          lastRPointRoadVertex = rPointRoadVertex
-        end
+        lastLPointRoadVertex = lPointRoadVertex
+        lastRPointRoadVertex = rPointRoadVertex
       end
 
-      local roadPart = AssetService:CreateMeshPartAsync(Content.fromObject(roadMesh))
-      roadPart.CFrame = startCF
-      roadPart.Anchored = true
-      roadPart.Parent = pathFolder
-      roadPart.Name = "Road"
-      roadPart.Color = Color3.new(0.1, 0.1, 0.1)
-      roadPart:AddTag('ROAD')
-
-      local leftWallPart = AssetService:CreateMeshPartAsync(Content.fromObject(leftWallMesh))
-      leftWallPart.CFrame = startCF
-      leftWallPart.Anchored = true
-      leftWallPart.Parent = pathFolder
-      leftWallPart.Name = "LeftWall"
-      leftWallPart.Color = Color3.new(1, 1, 1)
-      leftWallPart:AddTag('WALL')
-
-      local rightWallPart = AssetService:CreateMeshPartAsync(Content.fromObject(rightWallMesh))
-      rightWallPart.CFrame = startCF
-      rightWallPart.Anchored = true
-      rightWallPart.Parent = pathFolder
-      rightWallPart.Name = "RightWall"
-      rightWallPart.Color = Color3.new(1, 1, 1)
-      rightWallPart:AddTag('WALL')
+      placeMesh(roadMesh, startCF, "Road", Color3.new(0.1, 0.1, 0.1), 'ROAD', pathFolder)
+      placeMesh(leftWallMesh, startCF, "LeftWall", Color3.new(1, 1, 1), 'WALL', pathFolder)
+      placeMesh(rightWallMesh, startCF, "RightWall", Color3.new(1, 1, 1), 'WALL', pathFolder)
     end
   end
 end

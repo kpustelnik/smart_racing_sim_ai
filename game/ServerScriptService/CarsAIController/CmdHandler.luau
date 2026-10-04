@@ -23,11 +23,14 @@ local EnvColors = {
   Color3.new(0, 1, 1),
 }
 local LastEnvColor = 0
-local NoProgressTimeout: number = 5 -- TODO: Add as global parameter
+
+local TerminationReward: number = -40
+local TruncationReward: number = 0
+local AgentCollisionPenalty: number = -60
 
 -- Creates a new environment
 type CreateEnvData = {}
-CmdHandler['CREATE_ENV'] = function (self: CmdHandler, data: CreateEnvData, envId: string?): ()
+CmdHandler['CREATE_ENV'] = function (self: CmdHandler, _data: CreateEnvData, envId: string?): ()
   if envId == nil then return end
   if self.Envs[envId] ~= nil then
     warn(`Environment {envId} already exists`)
@@ -62,18 +65,18 @@ end
 type UpdateCollisionsData = {
   enable_collisions: boolean?
 }
-CmdHandler['UPDATE_COLLISIONS'] = function (self: CmdHandler, data: UpdateCollisionsData, envId: string?): () 
+CmdHandler['UPDATE_COLLISIONS'] = function (self: CmdHandler, data: UpdateCollisionsData, _envId: string?): ()
   local enableCollisions: boolean? = data.enable_collisions
   if enableCollisions ~= nil then
     self.EnableEnvCollisions = enableCollisions
   end
-  for cEnvId: string, _: EnvData in pairs(self.Envs) do
+  for cEnvId: string, _: EnvData? in pairs(self.Envs) do
     local CollisionGroupName: string = CarsController.GetEnvCollisionGroup(cEnvId)
     local suc: boolean, res = pcall(function()
       PhysicsService:CollisionGroupSetCollidable(CollisionGroupName, CollisionGroupName, self.EnableEnvCollisions)
     end)
     if not suc then
-      warn(`Failed to update collision settings for env {envId}: {res}`)
+      warn(`Failed to update collision settings for env {cEnvId}: {res}`)
     end
   end
 end
@@ -85,14 +88,15 @@ CmdHandler['SPAWN_AGENTS'] = function (self: CmdHandler, data: SpawnAgentsData, 
   if self.Envs[envId] == nil then
     CmdHandler['CREATE_ENV'](self, {} :: CreateEnvData, envId) -- Ensure env exists
   end
-  local envData: EnvData = self.Envs[envId]
+  local envData: EnvData? = self.Envs[envId]
+  if envData == nil then return end
 
   local currentAgentModels: { Instance } = {}
   for _, agentId: string in ipairs(envData.Agents) do
     local carData: CarsController.CarData? = CarsController.GetCarData(agentId)
     if carData ~= nil then
       local carModel: Model? = carData.Model
-      if carModel ~= nil then table.insert(currentAgentModels, carData.Model :: Instance) end
+      if carModel ~= nil then table.insert(currentAgentModels, carModel) end
     end
   end
 
@@ -144,7 +148,7 @@ CmdHandler['REMOVE_AGENTS'] = function (self: CmdHandler, data: RemoveAgentsData
 end
 
 type CloseData = {}
-CmdHandler['CLOSE'] = function (self: CmdHandler, data: CloseData, envId: string?): ()
+CmdHandler['CLOSE'] = function (self: CmdHandler, _data: CloseData, envId: string?): ()
   if envId == nil then return end
   local envData: EnvData? = self.Envs[envId]
   if envData == nil then return end
@@ -159,27 +163,37 @@ CmdHandler['CLOSE'] = function (self: CmdHandler, data: CloseData, envId: string
 end
 
 type CloseAllData = {}
-CmdHandler['CLOSE_ALL'] = function (self: CmdHandler, data: CloseAllData, envId: string?): ()
+CmdHandler['CLOSE_ALL'] = function (self: CmdHandler, _data: CloseAllData, _envId: string?): ()
   for cEnvId: string in pairs(self.Envs) do
     CmdHandler['CLOSE'](self, {} :: CloseData, cEnvId)
   end
 end
 
 type ActionData = { [string]: { number } }
-CmdHandler['ACTION'] = function (self: CmdHandler, data: ActionData, envId: string?): ()
+CmdHandler['ACTION'] = function (self: CmdHandler, data: ActionData, _envId: string?): ()
   for agentId: string, agentData in pairs(data) do
     local carData: CarsController.CarData? = CarsController.GetCarData(agentId)
     if carData == nil then continue end
 
-    carData.CarInputs:SetAttribute('throttleInput', agentData[1])
-    carData.CarInputs:SetAttribute('steeringInput', agentData[2])
-    carData.CarInputs:SetAttribute('nitroInput', agentData[3] > 0.5)
+    if typeof(agentData) ~= 'table' then continue end
+    local throttle: number? = tonumber(agentData[1])
+    local steering: number? = tonumber(agentData[2])
+    local nitro: number? = tonumber(agentData[3])
+    if throttle == nil or steering == nil or nitro == nil then
+      warn(`Malformed action for agent {agentId}`)
+      continue
+    end
+
+    carData.CarInputs:SetAttribute('throttleInput', throttle)
+    carData.CarInputs:SetAttribute('steeringInput', steering)
+    carData.CarInputs:SetAttribute('nitroInput', nitro > 0.5)
     carData.IsStateUpdated = true
+    carData.LastAction = { throttle, steering, nitro }
 
     -- Update car physics
     local lastUpdateTime: number? = carData.LastUpdateTime
     if lastUpdateTime ~= nil then
-      local dt: number = tick() - lastUpdateTime
+      local dt: number = math.clamp(tick() - lastUpdateTime, 0, 4 / self.MaxFPS)
       carData.CarController:update(dt)
     end
     carData.LastUpdateTime = tick()
@@ -189,8 +203,9 @@ end
 type FreezeData = {
   status: boolean
 }
-CmdHandler['FREEZE'] = function (self: CmdHandler, data: FreezeData, envId: string?): ()
-  for _: string, envData in pairs(self.Envs) do
+CmdHandler['FREEZE'] = function (self: CmdHandler, data: FreezeData, _envId: string?): ()
+  for _: string, envData: EnvData? in pairs(self.Envs) do
+    if envData == nil then continue end
     for _, agentId: string in ipairs(envData.Agents) do
       local carData: CarsController.CarData? = CarsController.GetCarData(agentId)
       if carData == nil then continue end
@@ -198,9 +213,32 @@ CmdHandler['FREEZE'] = function (self: CmdHandler, data: FreezeData, envId: stri
       -- Anchor / unanchor the car model
       local carModel: Model? = carData.Model
       if carModel ~= nil then
-        for _, part: BasePart in ipairs(carModel:GetDescendants()) do
-          if part:IsA('BasePart') then
-            part.Anchored = data.status
+        if data.status then
+          local saved: { [BasePart]: { Linear: Vector3, Angular: Vector3 } } = {}
+          for _, part: Instance in ipairs(carModel:GetDescendants()) do
+            if part:IsA('BasePart') and not part.Anchored then
+              saved[part] = { Linear = part.AssemblyLinearVelocity, Angular = part.AssemblyAngularVelocity }
+            end
+          end
+          if carData.FrozenVelocities == nil then carData.FrozenVelocities = saved end
+
+          for _, part: Instance in ipairs(carModel:GetDescendants()) do
+            if part:IsA('BasePart') then part.Anchored = true end
+          end
+        else
+          for _, part: Instance in ipairs(carModel:GetDescendants()) do
+            if part:IsA('BasePart') then part.Anchored = false end
+          end
+
+          local frozen = carData.FrozenVelocities
+          if frozen ~= nil then
+            for part: BasePart, velocity in pairs(frozen) do
+              if part.Parent ~= nil then
+                part.AssemblyLinearVelocity = velocity.Linear
+                part.AssemblyAngularVelocity = velocity.Angular
+              end
+            end
+            carData.FrozenVelocities = nil
           end
         end
       end
@@ -227,12 +265,39 @@ CmdHandler['FREEZE'] = function (self: CmdHandler, data: FreezeData, envId: stri
   end
 end
 
-CmdHandler['PING'] = function (self: CmdHandler, _: FreezeData, envId: string?): () --[[ Do nothing. It's just for maintaining the communication. ]] end
+type PingData = { t: number? }
+CmdHandler['PING'] = function (self: CmdHandler, data: PingData, _envId: string?): ()
+  local sentAt: number? = if typeof(data) == 'table' then data.t else nil
+  if sentAt == nil then return end
+
+  local success: boolean, result = pcall(function()
+    self.WSClient:Send(HttpService:JSONEncode({ __pong = { t = sentAt } }))
+  end)
+  if not success then warn('Failed to answer ping', result) end
+end
+
+local AllowedCommands: { [string]: boolean } = {
+  CREATE_ENV = true,
+  UPDATE_COLLISIONS = true,
+  SPAWN_AGENTS = true,
+  RESET_AGENTS = true,
+  REMOVE_AGENTS = true,
+  CLOSE = true,
+  CLOSE_ALL = true,
+  ACTION = true,
+  FREEZE = true,
+  PING = true,
+}
 
 CmdHandler.Handle = function (self: CmdHandler, msg: BackendMessage): ()
   local command: string = msg.command
   local data: any = msg.data
   local envid: string? = msg.envid
+
+  if typeof(command) ~= 'string' or not AllowedCommands[command] then
+    warn(`Unknown command received: {command}`)
+    return
+  end
 
   local handleFunc: any = CmdHandler[command]
   if handleFunc then
@@ -245,6 +310,7 @@ end
 
 CmdHandler.Cleanup = function (self: CmdHandler): ()
   CmdHandler['CLOSE_ALL'](self, {} :: CloseAllData, nil)
+  CarsController.DisconnectWallEvents()
   if self.HeartbeatEvent ~= nil then
     self.HeartbeatEvent:Disconnect()
     self.HeartbeatEvent = nil
@@ -252,7 +318,8 @@ CmdHandler.Cleanup = function (self: CmdHandler): ()
 end
 
 CmdHandler.GetCarEnv = function (self: CmdHandler, carData: CarsController.CarData): string?
-  for EnvId: string, EnvData: EnvData in pairs(self.Envs) do
+  for EnvId: string, EnvData: EnvData? in pairs(self.Envs) do
+    if EnvData == nil then continue end
     for _, AgentId: string in ipairs(EnvData.Agents) do
       local cCarData: CarsController.CarData? = CarsController.GetCarData(AgentId)
       if cCarData == nil then continue end
@@ -262,17 +329,20 @@ CmdHandler.GetCarEnv = function (self: CmdHandler, carData: CarsController.CarDa
   return nil
 end
 
-CmdHandler.GetNextCar = function (self: CmdHandler, carData: CarsController.CarData): (CarsController.CarData?, number?)
-  local EnvId: string = self:GetCarEnv(carData) :: string
-  if EnvId == nil then return nil end
+-- Closest car of the same environment that is ahead of the given one on the track, or behind it
+local function findNeighbourCar(self: CmdHandler, carData: CarsController.CarData, ahead: boolean): (CarsController.CarData?, number?)
+  local EnvId: string? = self:GetCarEnv(carData)
+  if EnvId == nil then return nil, nil end
   local EnvData: EnvData? = self.Envs[EnvId]
-  if EnvData == nil then return nil end
+  if EnvData == nil then return nil, nil end
 
-  local carPivot: CFrame = carData.Model:GetPivot()
+  local carModel: Model? = carData.Model
+  if carModel == nil then return nil, nil end
+  local carPivot: CFrame = carModel:GetPivot()
   local carTrackProgress: number = CheckpointsController.GetTrackProgressState(carPivot.Position, carPivot.LookVector)
 
-  local nextCarData: CarsController.CarData? = nil
-  local nextCarProgress: number = math.huge
+  local neighbourCarData: CarsController.CarData? = nil
+  local neighbourCarProgress: number = if ahead then math.huge else 0
   for _, AgentId: string in ipairs(EnvData.Agents) do
     local cCarData: CarsController.CarData? = CarsController.GetCarData(AgentId)
     if cCarData == nil then continue end
@@ -281,43 +351,25 @@ CmdHandler.GetNextCar = function (self: CmdHandler, carData: CarsController.CarD
 
     local cCarPivot: CFrame = cCarModel:GetPivot()
     local cProgress: number = CheckpointsController.GetTrackProgressState(cCarPivot.Position, cCarPivot.LookVector)
-    if cProgress > carTrackProgress and cProgress < nextCarProgress then
-      nextCarData = cCarData
-      nextCarProgress = cProgress
+    local isCloser: boolean = if ahead
+      then cProgress > carTrackProgress and cProgress < neighbourCarProgress
+      else cProgress < carTrackProgress and cProgress > neighbourCarProgress
+    if isCloser then
+      neighbourCarData = cCarData
+      neighbourCarProgress = cProgress
     end
   end
 
-  if nextCarData == nil then return nil, nil end
-  return nextCarData, nextCarProgress
+  if neighbourCarData == nil then return nil, nil end
+  return neighbourCarData, neighbourCarProgress
+end
+
+CmdHandler.GetNextCar = function (self: CmdHandler, carData: CarsController.CarData): (CarsController.CarData?, number?)
+  return findNeighbourCar(self, carData, true)
 end
 
 CmdHandler.GetFollowingCar = function (self: CmdHandler, carData: CarsController.CarData): (CarsController.CarData?, number?)
-  local EnvId: string = self:GetCarEnv(carData) :: string
-  if EnvId == nil then return nil end
-  local EnvData: EnvData? = self.Envs[EnvId]
-  if EnvData == nil then return nil end
-
-  local carPivot: CFrame = carData.Model:GetPivot()
-  local carTrackProgress: number = CheckpointsController.GetTrackProgressState(carPivot.Position, carPivot.LookVector)
-
-  local followingCarData: CarsController.CarData? = nil
-  local followingCarProgress: number = 0
-  for _, AgentId: string in ipairs(EnvData.Agents) do
-    local cCarData: CarsController.CarData? = CarsController.GetCarData(AgentId)
-    if cCarData == nil then continue end
-    local cCarModel: Model? = cCarData.Model
-    if cCarModel == nil or cCarModel == carData.Model then continue end
-
-    local cCarPivot: CFrame = cCarModel:GetPivot()
-    local cProgress: number = CheckpointsController.GetTrackProgressState(cCarPivot.Position, cCarPivot.LookVector)
-    if cProgress < carTrackProgress and cProgress > followingCarProgress then
-      followingCarData = cCarData
-      followingCarProgress = cProgress
-    end
-  end
-
-  if followingCarData == nil then return nil, nil end
-  return followingCarData, followingCarProgress
+  return findNeighbourCar(self, carData, false)
 end
 
 CmdHandler.GetReward = function (self: CmdHandler, carData: CarsController.CarData): (number?, number?)
@@ -330,8 +382,8 @@ CmdHandler.GetReward = function (self: CmdHandler, carData: CarsController.CarDa
   end
 
   local carCFrame: CFrame = carModel:GetPivot()
-  local carPosition = carCFrame.Position
-  local carOrientation = carCFrame.LookVector
+  local carPosition: Vector3 = carCFrame.Position
+  local carOrientation: Vector3 = carCFrame.LookVector
     
   local trackProgress: number, checkpoint: number, _: number? = CheckpointsController.GetTrackProgressState(carPosition, carOrientation)
   if checkpoint == carData.LastCheckpoint + 1 or (carData.LastCheckpoint == #CheckpointsController.Checkpoints and checkpoint == 1) then
@@ -356,7 +408,7 @@ CmdHandler.GetReward = function (self: CmdHandler, carData: CarsController.CarDa
     end
     carData.LastBestProgress = totalProgress
     carData.LastBestProgressTime = tick()
-  elseif tick() - carData.LastBestProgressTime > NoProgressTimeout and carData.FreezeStart == nil then
+  elseif tick() - carData.LastBestProgressTime > self.NoProgressTimeout and carData.FreezeStart == nil then
     carData.TruncationPending = true -- Stuck for too long
   end
 
@@ -415,9 +467,10 @@ CmdHandler.GetReward = function (self: CmdHandler, carData: CarsController.CarDa
   reward += speedBonus
   ]]
 
-  if carData.IsTouchingAgent then -- Touching penalty
+  local terminalPenalty: number = 0
+  if carData.IsTouchingAgent then -- Touching another agent ends the episode
     if self.EnableEnvCollisions then
-      reward -= 60
+      terminalPenalty += AgentCollisionPenalty
       carData.TerminationPending = true
       self.AllCollisions += 1
     end
@@ -429,8 +482,11 @@ CmdHandler.GetReward = function (self: CmdHandler, carData: CarsController.CarDa
     self.AllAgents += 1
   end
 
-  if carData.TruncationPending or carData.TerminationPending then
-    return -40, totalProgress
+  if carData.TerminationPending then
+    return TerminationReward + terminalPenalty, totalProgress
+  end
+  if carData.TruncationPending then
+    return TruncationReward + terminalPenalty, totalProgress
   end
 
   return reward, totalProgress
@@ -438,6 +494,7 @@ end
 
 type DataToSend = {
   obs: { number },
+  last_observation: { number }?,
   reward: number,
   terminated: boolean,
   truncated: boolean
@@ -453,6 +510,12 @@ CmdHandler.Setup = function (self: CmdHandler): ()
   local evaluationStart: number = sct
 
   self.HeartbeatEvent = RunService.Heartbeat:Connect(function (dt: number): ()
+    if self.WSClient.ConnectionState == Enum.WebStreamClientState.Closed then
+      warn('Simulation loop outlived its websocket; shutting it down.')
+      self:Cleanup()
+      return
+    end
+
     totalDt += dt
     if totalDt < 1/self.MaxFPS then return end
     if runningPrevious then
@@ -464,7 +527,7 @@ CmdHandler.Setup = function (self: CmdHandler): ()
     if ct > lastStatisticsPrint + 30 then
       print('Average loop time: ', self.SumLoopsTime / math.max(self.AllLoops, 1))
       print('Average loop progress: ', self.AllAgentLoops / math.max(self.AllAgents, 1))
-      print('Agents colliding %: ', math.round(self.AllCollisions / self.AllAgents * 100))
+      print('Agents colliding %: ', math.round(self.AllCollisions / math.max(self.AllAgents, 1) * 100))
       print('Evaluation time: ', ct - evaluationStart)
       lastStatisticsPrint = ct
     end
@@ -473,75 +536,81 @@ CmdHandler.Setup = function (self: CmdHandler): ()
     totalDt = 0
     runningPrevious = true
 
-    local dataToSend: { [string]: DataToSend? } = {}
-    local isAnyCarActive: boolean = false
-    local isNoneUpdated: boolean = true
+    local tickOk: boolean, tickError: any = pcall(function(): ()
+      local dataToSend: { [string]: DataToSend? } = {}
+      local isAnyCarActive: boolean = false
+      local isNoneUpdated: boolean = true
 
-    for EnvId: string, EnvData: EnvData in pairs(self.Envs) do
-      local AnyAgentTerminating: boolean = false
-      for _, AgentId: string in ipairs(EnvData.Agents) do
-        local CarData: CarsController.CarData? = CarsController.GetCarData(AgentId)
-        if CarData == nil then continue end
-        if CarData.TerminationPending or CarData.TruncationPending then AnyAgentTerminating = true break end
-      end
-      for _, AgentId: string in ipairs(EnvData.Agents) do
-        local CarData: CarsController.CarData? = CarsController.GetCarData(AgentId)
-        if CarData == nil then continue end
-        if CarData.FreezeStart ~= nil then continue end
-        isAnyCarActive = true
-
-        if CarData.IsStateUpdated then isNoneUpdated = false end
-        CarData.IsStateUpdated = false
-
-        -- Fetch the reward for last action
-        -- It's possible to also fetch the observation before termination here but the parallel framework does not support it anyways (infos > `terminal_observation`)
-        local reward: number?, totalProgress: number? = self:GetReward(CarData)
-        if reward == nil then continue end
-        
-        local wasTerminationPending: boolean = CarData.TerminationPending
-        local wasTruncationPending: boolean = CarData.TruncationPending
-        local isRemoving: boolean = (self.TerminateAll and AnyAgentTerminating) or wasTerminationPending or wasTruncationPending
-        if isRemoving and not AnyAgentTerminating then continue end -- Wait for the next one to remove all at once (in case of TerminateAll) to provide a more consistent experience for the learning algorithm
-        if wasTerminationPending then
-          print(`Car {AgentId} terminated. Total Progress: {totalProgress}`)
-        elseif wasTruncationPending then
-          print(`Car {AgentId} truncated due to inactivity. Total Progress: {totalProgress}`)
-        elseif isRemoving then
-          print(`Car {AgentId} removed due to another termination within virtual environment. Total Progress: {totalProgress}`)
-        end
-
-        if isRemoving then -- Respawn the car due to termination and/or truncation (so that we provide fresh data)
-          CmdHandler['RESET_AGENTS'](self, { agents = { AgentId } } :: ResetData, EnvId)
-          CarData = CarsController.GetCarData(AgentId) -- Retrieve fresh data
+      for EnvId: string, EnvData: EnvData? in pairs(self.Envs) do
+        if EnvData == nil then continue end
+        local AnyAgentTerminating: boolean = false
+        for _, AgentId: string in ipairs(EnvData.Agents) do
+          local CarData: CarsController.CarData? = CarsController.GetCarData(AgentId)
           if CarData == nil then continue end
+          if CarData.TerminationPending or CarData.TruncationPending then AnyAgentTerminating = true; break end
         end
+        for _, AgentId: string in ipairs(EnvData.Agents) do
+          local CarData: CarsController.CarData? = CarsController.GetCarData(AgentId)
+          if CarData == nil then continue end
+          if CarData.FreezeStart ~= nil then continue end
+          isAnyCarActive = true
 
-        local obs: CarsController.CarObservation = CarsController.RetrieveObservation(AgentId)
-        dataToSend[AgentId] = {
-          -- last_observation?
-          obs = obs,
-          -- last_action?
-          reward = reward,
-          terminated = wasTerminationPending,
-          truncated = wasTruncationPending or (self.TerminateAll and AnyAgentTerminating and not wasTerminationPending)
-        } :: DataToSend
+          if CarData.IsStateUpdated then isNoneUpdated = false end
+          CarData.IsStateUpdated = false
+
+          -- Fetch the reward for last action
+          -- It's possible to also fetch the observation before termination here but the parallel framework does not support it anyways (infos > `terminal_observation`)
+          local reward: number?, totalProgress: number? = self:GetReward(CarData)
+          if reward == nil then continue end
+        
+          local wasTerminationPending: boolean = CarData.TerminationPending
+          local wasTruncationPending: boolean = CarData.TruncationPending
+          local isRemoving: boolean = (self.TerminateAll and AnyAgentTerminating) or wasTerminationPending or wasTruncationPending
+          if isRemoving and not AnyAgentTerminating then continue end -- Wait for the next one to remove all at once (in case of TerminateAll) to provide a more consistent experience for the learning algorithm
+          if wasTerminationPending then
+            print(`Car {AgentId} terminated. Total Progress: {totalProgress}`)
+          elseif wasTruncationPending then
+            print(`Car {AgentId} truncated due to inactivity. Total Progress: {totalProgress}`)
+          elseif isRemoving then
+            print(`Car {AgentId} removed due to another termination within virtual environment. Total Progress: {totalProgress}`)
+          end
+
+          local finalObservation: CarsController.CarObservation? = if isRemoving then CarData.LastObservation else nil
+
+          if isRemoving then -- Respawn the car due to termination and/or truncation (so that we provide fresh data)
+            CmdHandler['RESET_AGENTS'](self, { agents = { AgentId } } :: ResetData, EnvId)
+            CarData = CarsController.GetCarData(AgentId) -- Retrieve fresh data
+            if CarData == nil then continue end
+          end
+
+          local obs: CarsController.CarObservation? = CarsController.RetrieveObservation(AgentId)
+          if obs == nil then continue end
+          dataToSend[AgentId] = {
+            obs = obs,
+            last_observation = finalObservation,
+            reward = reward,
+            terminated = wasTerminationPending,
+            truncated = wasTruncationPending or (self.TerminateAll and AnyAgentTerminating and not wasTerminationPending)
+          } :: DataToSend
+        end
       end
-    end
 
-    if isNoneUpdated then
-      if isAnyCarActive then ConsecutiveUnresponsiveTicks += 1 end
-    else
-      ConsecutiveUnresponsiveTicks = 0
-    end
-    if ConsecutiveUnresponsiveTicks > 250 then
-      warn('No cars have updated their state for a long time, closing env')
-      self:Cleanup()
-    end
+      if isNoneUpdated then
+        if isAnyCarActive then ConsecutiveUnresponsiveTicks += 1 end
+      else
+        ConsecutiveUnresponsiveTicks = 0
+      end
+      if ConsecutiveUnresponsiveTicks > 250 then
+        warn('No cars have updated their state for a long time, closing env')
+        self:Cleanup()
+      end
 
-    local success: boolean, result = pcall(function ()
-      self.WSClient:Send(HttpService:JSONEncode(dataToSend))
+      local success: boolean, result = pcall(function ()
+        self.WSClient:Send(HttpService:JSONEncode(dataToSend))
+      end)
+      if not success then warn('Failed to send data to backend', result) end
     end)
-    if not success then warn('Failed to send data to backend', result) end
+    if not tickOk then warn('Simulation tick failed:', tickError) end
 
     runningPrevious = false
   end)
@@ -563,6 +632,7 @@ CmdHandler.New = function (wsClient: WebStreamClient, carModel: string): CmdHand
     EnableEnvCollisions = true,
     TerminateAll = false,
     WallKill = true,
+    NoProgressTimeout = 5,
     CarModel = carModel
   }, CmdHandler)
   return self
@@ -576,7 +646,21 @@ type EnvData = {
 type CmdHandlerData = {
   Envs: { [string]: EnvData? },
   WSClient: WebStreamClient,
-  CarModel: string
+  CarModel: string,
+
+  HeartbeatEvent: RBXScriptConnection?,
+  MaxFPS: number,
+
+  SumLoopsTime: number,
+  AllLoops: number,
+  AllAgentLoops: number,
+  AllCollisions: number,
+  AllAgents: number,
+
+  EnableEnvCollisions: boolean,
+  TerminateAll: boolean,
+  WallKill: boolean,
+  NoProgressTimeout: number
 }
 
 export type CmdHandler = typeof(setmetatable({} :: CmdHandlerData, CmdHandler))

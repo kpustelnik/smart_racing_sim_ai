@@ -4,22 +4,17 @@
 
 local Constants = require(script.Parent:WaitForChild('Constants'))
 local Units = require(script.Parent:WaitForChild('Units'))
+local Attributes = require(script.Parent:WaitForChild('Attributes'))
 local function lerp(a: number, b: number, t: number): number return a + (b - a) * t end
 
-local car: Folder = script.Parent.Parent
+local car: Folder = script.Parent.Parent :: any
 local chassis: BasePart = car:WaitForChild('Chassis') :: BasePart
 local inputs: Configuration = car:WaitForChild('Inputs') :: Configuration
 local engine: Folder = car:WaitForChild('Engine') :: Folder
 local steering: Folder = car:WaitForChild('Steering') :: Folder
 local wheels: Folder = car:WaitForChild('Wheels') :: Folder
 
-local ReadNumberAttribute = function (i: Instance, attrName: string): number?
-	local value: unknown? = i:GetAttribute(attrName)
-	if value ~= nil and typeof(value) == "number" then
-		return value :: number
-	end
-	return nil
-end
+local ReadNumberAttribute = Attributes.readNumber
 
 local wheelParts: { BasePart } = {
 	wheels:WaitForChild('WheelFR'):WaitForChild('Wheel') :: BasePart,
@@ -156,7 +151,7 @@ local function updateEngine(deltaTime: number): ()
 
 	-- Calculate the torque and angular velocity required to reach the target linear velocity
 	local chassisSpeed: number = getChassisForwardSpeed()
-	local torqueAlpha: number = math.min(chassisSpeed, maxSpeed) / maxSpeed
+	local torqueAlpha: number = math.clamp(math.abs(chassisSpeed), 0, maxSpeed) / maxSpeed
 	local torque: number = lerp(engineParameters.minSpeedTorque, engineParameters.maxSpeedTorque, torqueAlpha)
 	if boolIsNitroEnabled then torque = engineParameters.nitroTorque end
 	local studsSpeed: number = Units.milesPerHourToStudsPerSecond(engineSpeed)
@@ -188,7 +183,8 @@ local function updateSteering(): ()
 	if steeringInput == nil then return end
 	local nSteeringInput: number = steeringInput :: number
 	local maxSpeed: number = math.max(engineParameters.forwardMaxSpeed, engineParameters.reverseMaxSpeed)
-	local speed: number = math.min(getChassisForwardSpeed(), maxSpeed)
+	if maxSpeed <= 0 then return end
+	local speed: number = math.clamp(math.abs(getChassisForwardSpeed()), 0, maxSpeed)
 	-- Steering is reduced at higher speeds to provide smoother handling
 	local steeringFactor: number = math.max(1 - (speed / maxSpeed) * steeringParameters.steeringReduction, 0)
 	local steeringAmount: number = nSteeringInput * steeringFactor
@@ -216,46 +212,9 @@ local function updateWheelFriction(): ()
 end
 
 local function initialize(): ()
-	-- Cache all parameters in tables and update them when the corresponding Attribute updates.
-	-- Parameters aren't going to change very often so there's no reason to call :GetAttribute() constantly.
-	for parameter: string in engineParameters do
-		engine:GetAttributeChangedSignal(parameter):Connect(function (): ()
-			local value: unknown? = engine:GetAttribute(parameter)
-			if value ~= nil and typeof(value) == 'number' then
-				engineParameters[parameter] = value
-			end
-		end)
-		local nvalue: unknown? = engine:GetAttribute(parameter)
-		if nvalue ~= nil and typeof(nvalue) == 'number' then
-			engineParameters[parameter] = nvalue
-		end
-	end
-
-	for parameter: string in steeringParameters do
-		steering:GetAttributeChangedSignal(parameter):Connect(function(): ()
-			local value: unknown? = steering:GetAttribute(parameter)
-			if value ~= nil and typeof(value) == 'number' then
-				steeringParameters[parameter] = value
-			end
-		end)
-		local nvalue: unknown? = steering:GetAttribute(parameter)
-		if nvalue ~= nil and typeof(nvalue) == 'number' then
-			steeringParameters[parameter] = nvalue
-		end
-	end
-
-	for parameter: string in wheelParameters do
-		wheels:GetAttributeChangedSignal(parameter):Connect(function(): ()
-			local value: unknown? = wheels:GetAttribute(parameter)
-			if value ~= nil and typeof(value) == 'number' then
-				wheelParameters[parameter] = value
-			end
-		end)
-		local nvalue: unknown? = wheels:GetAttribute(parameter)
-		if nvalue ~= nil and typeof(nvalue) == 'number' then
-			wheelParameters[parameter] = nvalue
-		end
-	end
+	Attributes.bindNumbers(engine, engineParameters)
+	Attributes.bindNumbers(steering, steeringParameters)
+	Attributes.bindNumbers(wheels, wheelParameters)
 end
 
 local Controller = {}

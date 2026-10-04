@@ -20,51 +20,56 @@ License: zlib
      misrepresented as being the original software.
   3. This notice may not be removed or altered from any source distribution.
 -- modified by xxopxe@gmail.com
+-- further modified to support Luau typing
 ]]
 
 
-local floor = math.floor
+local floor: (number) -> number = math.floor
 
+export type PriorityQueue<T = any> = {
+  heap_val: { T },
+  heap_pri: { number },
+  current_size: number,
+
+  initialize: (self: PriorityQueue<T>) -> (),
+  empty: (self: PriorityQueue<T>) -> boolean,
+  size: (self: PriorityQueue<T>) -> number,
+  swim: (self: PriorityQueue<T>, i: number) -> (),
+  sink: (self: PriorityQueue<T>, i: number) -> (),
+  min_child: (self: PriorityQueue<T>, i: number) -> number,
+  put: (self: PriorityQueue<T>, v: T, p: number) -> (),
+  pop: (self: PriorityQueue<T>) -> (T, number),
+  peek: (self: PriorityQueue<T>) -> (T?, number?),
+}
+
+type Queue = PriorityQueue<any>
 
 local PriorityQueue = {}
 PriorityQueue.__index = PriorityQueue
 
-setmetatable(
-  PriorityQueue,
-  {
-    __call = function ()
-      local new = {}
-      setmetatable(new, PriorityQueue)
-      new:initialize()
-      return new
-    end
-  }
-)
-
-
-function PriorityQueue:initialize(): ()
-  --[[  Initialization.
-    Example:
-        PriorityQueue = require("priority_queue")
-        pq = PriorityQueue()
-    ]]--
+--[[  Initialization.
+  Example:
+      PriorityQueue = require("priority_queue")
+      pq = PriorityQueue.new()
+  ]]
+function PriorityQueue.initialize(self: Queue): ()
   self.heap_val = {}
   self.heap_pri = {}
   self.current_size = 0
 end
 
-function PriorityQueue:empty(): boolean
+function PriorityQueue.empty(self: Queue): boolean
   return self.current_size == 0
 end
 
-function PriorityQueue:size(): number
+function PriorityQueue.size(self: Queue): number
   return self.current_size
 end
 
-function PriorityQueue:swim(i): ()
+function PriorityQueue.swim(self: Queue, i: number): ()
   -- Swim up on the tree and fix the order heap property.
-  local heap_val = self.heap_val
-  local heap_pri = self.heap_pri
+  local heap_val: { any } = self.heap_val
+  local heap_pri: { number } = self.heap_pri
 
   while floor(i / 2) > 0 do
     local half: number = floor(i / 2)
@@ -76,24 +81,23 @@ function PriorityQueue:swim(i): ()
   end
 end
 
-function PriorityQueue:put(v, p): ()
-  --[[ Put an item on the queue.
-    Args:
-        v: the item to be stored
-        p(number): the priority of the item
-    ]]--
-  --
+--[[ Put an item on the queue.
+  Args:
+      v: the item to be stored
+      p(number): the priority of the item
+  ]]
+function PriorityQueue.put(self: Queue, v: any, p: number): ()
   self.current_size = self.current_size + 1
   self.heap_val[self.current_size] = v
   self.heap_pri[self.current_size] = p
   self:swim(self.current_size)
 end
 
-function PriorityQueue:sink(i: number): ()
+function PriorityQueue.sink(self: Queue, i: number): ()
   -- Sink down on the tree and fix the order heap property.
   local size: number = self.current_size
-  local heap_val = self.heap_val
-  local heap_pri = self.heap_pri
+  local heap_val: { any } = self.heap_val
+  local heap_pri: { number } = self.heap_pri
 
   while (i * 2) <= size do
     local mc: number = self:min_child(i)
@@ -105,7 +109,7 @@ function PriorityQueue:sink(i: number): ()
   end
 end
 
-function PriorityQueue:min_child(i)
+function PriorityQueue.min_child(self: Queue, i: number): number
   if (i * 2) + 1 > self.current_size then
     return i * 2
   else
@@ -117,11 +121,11 @@ function PriorityQueue:min_child(i)
   end
 end
 
-function PriorityQueue:pop()
+function PriorityQueue.pop(self: Queue): (any, number)
   -- Remove and return the top priority item
-  local heap_val = self.heap_val
-  local heap_pri = self.heap_pri
-  local retval, retprio = heap_val[1], heap_pri[1]
+  local heap_val: { any } = self.heap_val
+  local heap_pri: { number } = self.heap_pri
+  local retval: any, retprio: number = heap_val[1], heap_pri[1]
   heap_val[1], heap_pri[1] = heap_val[self.current_size], heap_pri[self.current_size]
   heap_val[self.current_size], heap_pri[self.current_size] = nil, nil
   self.current_size = self.current_size - 1
@@ -129,9 +133,16 @@ function PriorityQueue:pop()
   return retval, retprio
 end
 
-function PriorityQueue:peek()
+function PriorityQueue.peek(self: Queue): (any?, number?)
   -- return the top priority item
   return self.heap_val[1], self.heap_pri[1]
 end
 
-return PriorityQueue
+local function new<T>(): PriorityQueue<T>
+  local queue = setmetatable({}, PriorityQueue)
+  local typed: PriorityQueue<T> = (queue :: any) :: PriorityQueue<T>
+  typed:initialize()
+  return typed
+end
+
+return { new = new }

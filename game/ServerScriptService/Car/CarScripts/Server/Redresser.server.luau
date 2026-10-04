@@ -5,11 +5,14 @@
 local Workspace: Workspace = game:GetService('Workspace')
 if not script:IsDescendantOf(Workspace) then return end -- Check if the car was already spawned
 
-local car: Folder = script.Parent.Parent.Parent
+local car: Folder = script.Parent.Parent.Parent :: any
 local chassis: BasePart = car:WaitForChild('Chassis') :: BasePart
 local redress: Folder = car:WaitForChild('Redress') :: Folder
 local redressOrientation: AlignOrientation = redress:WaitForChild('RedressOrientation') :: AlignOrientation
 
+local Attributes = require(script.Parent.Parent:WaitForChild('Attributes'))
+
+local REDRESS_TIMEOUT: number = 5
 local FLIPPED_LIMIT: number = -0.5
 local UPRIGHT_LIMIT: number = 0.7
 local MOVING_LIMIT: number = 10
@@ -42,23 +45,13 @@ local function redressAsync(): ()
 	local cframe = CFrame.lookAt(Vector3.zero, forward, Vector3.yAxis)
 	redressOrientation.CFrame = cframe
 	redressOrientation.Enabled = true
-	repeat task.wait() until isUpright()
+	local elapsed: number = 0
+	repeat elapsed += task.wait() until isUpright() or elapsed >= REDRESS_TIMEOUT
 	redressOrientation.Enabled = false
 end
 
 local function initialize(): ()
-	-- Cache the attribute values in a table and update them when the attribute changes.
-	-- Parameters aren't going to change very often so there's no reason to call :GetAttribute() constantly.
-	for parameter: string in redressParameters do
-		redress:GetAttributeChangedSignal(parameter):Connect(function(): ()
-			local value: unknown? = redress:GetAttribute(parameter)
-			if typeof(value) == 'number' then
-				redressParameters[parameter] = value :: number
-			end
-		end)
-		local cvalue: unknown? = redress:GetAttribute(parameter)
-		if typeof(cvalue) == 'number' then redressParameters[parameter] = cvalue :: number end
-	end
+	Attributes.bindNumbers(redress, redressParameters)
 
 	task.spawn(function(): ()
 		while true do

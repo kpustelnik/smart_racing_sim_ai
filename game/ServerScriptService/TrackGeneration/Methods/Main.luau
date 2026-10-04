@@ -8,9 +8,10 @@ local PrebuiltObjects = Map:WaitForChild('Prebuilt')
 
 local Utilities = game:GetService("ServerScriptService"):WaitForChild("Utilities")
 local PriorityQueue = require(Utilities:WaitForChild('PriorityQueue'))
-local queue = PriorityQueue()
+local BoundingBox = require(Utilities:WaitForChild('BoundingBox'))
 
 local Types = require(script.Parent.Parent:WaitForChild("types"))
+local PathGeometry = require(script.Parent.Parent:WaitForChild("PathGeometry"))
 type Point = Types.Point
 
 -- Options
@@ -19,119 +20,25 @@ local minimumPoints: number = 30
 local targetPoints: number = 40
 local minimumDistance: number = 130
 local maxDistance: number = 500
+local maxBendFraction: number = 2/3
+local minTurnRadius: number = 60
 local trimPercentage: number = 0.6
+local minTrimPercentage: number = 0.3
+local maxTrimPercentage: number = 0.85
+local trimStep: number = 0.1
 local pathDistance: number = 100
 local PrebuiltStructureMargin = 30
 -- local minPrebuilt: number = 4
 
--- Functions
+local angleBetween = PathGeometry.angleBetween
+local intersects = PathGeometry.intersects
+local getPathDistance = PathGeometry.distanceToSegment
 
--- Angle between two vectors
-local angleBetween = function (a: Vector3, b: Vector3): number return math.atan2(a.X * b.Z - a.Z * b.X, a.X * b.X + a.Z * b.Z) end
 
--- Orientation of the ordered triplet (p, q, r)
-local orientation2d = function (p: Vector3, q: Vector3, r: Vector3): number
-  local value = (q.Z - p.Z) * (r.X - q.X) - (q.X - p.X) * (r.Z - q.Z)
-  if math.abs(value) < 0.0001 then
-    return 0
-  else
-    return if value > 0 then 1 else 2
-  end
-end
-
--- Checks if two lines intersect
-local intersects = function (p1: Vector3, q1: Vector3, p2: Vector3, q2: Vector3): boolean
-  local o1: number = orientation2d(p1, q1, p2)
-  local o2: number = orientation2d(p1, q1, q2)
-  local o3: number = orientation2d(p2, q2, p1)
-  local o4: number = orientation2d(p2, q2, q1)
-
-  if o1 ~= o2 and o3 ~= o4 then return true end
-  return false
-end
-
--- Returns minimal distance from point to line s -> e
-local getPathDistance = function (s: Vector3, e: Vector3, point: Vector3): number
-  local ray = Ray.new(s, e-s).Unit
-  local cp: Vector3 = ray:ClosestPoint(point)
-  local mag: number = (s - e).Magnitude
-  if (cp - s).Magnitude > mag then
-    return (e - point).Magnitude
-  elseif (cp - e).Magnitude > mag then
-    return (s - point).Magnitude
-  else
-    return (cp - point).Magnitude
-  end
-end
-
---[[
-	Micro-optimized code for computing a local space and the global space
-	bounding box for a set of parts and attachments as fast as possible.
-]]
-local function computeTwoBoundingBoxes(basisCFrame1: CFrame, allParts: { BasePart })
-	local inverseBasis1: CFrame = basisCFrame1:Inverse()
-	local xmin1: number, xmax1: number = math.huge, -math.huge
-	local ymin1: number, ymax1: number = math.huge, -math.huge
-	local zmin1: number, zmax1: number = math.huge, -math.huge
-	local xmin2: number, xmax2: number = math.huge, -math.huge
-	local ymin2: number, ymax2: number = math.huge, -math.huge
-	local zmin2: number, zmax2: number = math.huge, -math.huge
-
-	for _, part: BasePart in ipairs(allParts) do
-    local cframe = part.CFrame
-    local csize: Vector3 = part.Size
-    local sx: number, sy: number, sz: number = csize.X, csize.Y, csize.Z
-
-    -- Calculation for bounding box in the space of basisCFrame1
-    local localCFrame1: CFrame = inverseBasis1 * cframe -- put cframe in our local basis
-    local _, _, _,
-      t00: number, t01: number, t02: number,
-      t10: number, t11: number, t12: number,
-      t20: number, t21: number, t22: number = localCFrame1:components()
-    local hw1: number = 0.5 * (math.abs(sx * t00) + math.abs(sy * t01) + math.abs(sz * t02))
-    local hh1: number = 0.5 * (math.abs(sx * t10) + math.abs(sy * t11) + math.abs(sz * t12))
-    local hd1: number = 0.5 * (math.abs(sx * t20) + math.abs(sy * t21) + math.abs(sz * t22))
-    local x1: number, y1: number, z1: number = localCFrame1.X, localCFrame1.Y, localCFrame1.Z
-    xmin1 = math.min(xmin1, x1 - hw1)
-    xmax1 = math.max(xmax1, x1 + hw1)
-    ymin1 = math.min(ymin1, y1 - hh1)
-    ymax1 = math.max(ymax1, y1 + hh1)
-    zmin1 = math.min(zmin1, z1 - hd1)
-    zmax1 = math.max(zmax1, z1 + hd1)
-
-    -- Calculation for the bounding box in the global coordinate space
-    _, _, _,
-      t00, t01, t02,
-      t10, t11, t12,
-      t20, t21, t22 = cframe:components()
-    local hw2: number = 0.5 * (math.abs(sx * t00) + math.abs(sy * t01) + math.abs(sz * t02))
-    local hh2: number = 0.5 * (math.abs(sx * t10) + math.abs(sy * t11) + math.abs(sz * t12))
-    local hd2: number = 0.5 * (math.abs(sx * t20) + math.abs(sy * t21) + math.abs(sz * t22))
-    local x2: number, y2: number, z2: number = cframe.X, cframe.Y, cframe.Z
-    xmin2 = math.min(xmin2, x2 - hw2)
-    xmax2 = math.max(xmax2, x2 + hw2)
-    ymin2 = math.min(ymin2, y2 - hh2)
-    ymax2 = math.max(ymax2, y2 + hh2)
-    zmin2 = math.min(zmin2, z2 - hd2)
-    zmax2 = math.max(zmax2, z2 + hd2)
-	end
-
-	local localBoundingBoxOffset: Vector3 = Vector3.new(
-		0.5 * (xmin1 + xmax1),
-		0.5 * (ymin1 + ymax1),
-		0.5 * (zmin1 + zmax1)
-	)
-	local localBoundingBoxSize: Vector3 = Vector3.new(
-		xmax1 - xmin1,
-		ymax1 - ymin1,
-		zmax1 - zmin1
-	)
-
-	return localBoundingBoxOffset, localBoundingBoxSize
-end
-
-return function (pathFolder: Folder): { Point }
+return function (pathFolder: Folder): { Point }?
   assert(SpawnerPart:IsA('BasePart'), 'Spawner part should be a part')
+
+  local queue: PriorityQueue.PriorityQueue<{ Point }> = PriorityQueue.new()
 
   -- Add points visualisation
   local PointsFolder: Folder = Instance.new("Folder")
@@ -145,18 +52,21 @@ return function (pathFolder: Folder): { Point }
   -- Add other colliders
   for _, part: Instance in ipairs(CollectionService:GetTagged('COLLIDER')) do if part:IsA('BasePart') then part.Parent = CollidersFolder end end
 
-  local random: Random = Random.new(Workspace:GetAttribute("SEED"))
+  local seedAttribute: unknown? = Workspace:GetAttribute("SEED")
+  local seed: number = if typeof(seedAttribute) == "number" then seedAttribute else os.time()
+  local random: Random = Random.new(seed)
   local Points: { Point } = {}
 
   local PrebuiltConfigs: { [Instance]: any? } = {}
 
   for _, object: Instance in ipairs(PrebuiltObjects:GetChildren()) do
+    if not object:IsA('PVInstance') then continue end
     local objParts: { BasePart } = {}
     for _, part in ipairs(object:GetDescendants()) do
       if part:IsA('BasePart') then table.insert(objParts, part) end
     end
     local cf: CFrame = object:GetPivot()
-    local boundingBoxOffset: CFrame, boundingBoxSize: Vector3 = computeTwoBoundingBoxes(object:GetPivot(), objParts)
+    local boundingBoxOffset: Vector3, boundingBoxSize: Vector3 = BoundingBox.compute(cf, objParts)
     boundingBoxSize = Vector3.new(boundingBoxSize.X, 1000, boundingBoxSize.Z)
 
     local ColliderPart: Part = Instance.new('Part')
@@ -200,8 +110,10 @@ return function (pathFolder: Folder): { Point }
       PrebuiltConfigs[object] = Config
       if Config.NodeMap ~= nil then
         for from: string, to: string in pairs(Config.NodeMap) do
-          if objectPoints[from] ~= nil and objectPoints[to] ~= nil then
-            objectPoints[from].Next = objectPoints[to]
+          local fromPoint: Point? = objectPoints[from]
+          local toPoint: Point? = objectPoints[to]
+          if fromPoint ~= nil and toPoint ~= nil then
+            fromPoint.Next = toPoint
           end
         end
       end
@@ -253,11 +165,11 @@ return function (pathFolder: Folder): { Point }
     end
   end
 
-  local debugParts: boolean = true
+  local debugParts: boolean = false
   local genPath = function (path: { Point }): ()
     pathFolder:ClearAllChildren()
     if debugParts then -- Create connections for debug to show the currently checked combination
-      for i, curPoint: Point in ipairs(path) do
+      for i: number, curPoint: Point in ipairs(path) do
         local nextPoint: Point? = if i ~= #path then path[i + 1] else nil
         if curPoint.Next == nextPoint then continue end
         if nextPoint ~= nil then
@@ -293,8 +205,12 @@ return function (pathFolder: Folder): { Point }
   local finalPath: {Point}? = nil
 
   local j: number = 0
+  local currentTrim: number = trimPercentage
+  local windowBestDepth: number = 0
+  local previousWindowBestDepth: number? = nil
   while not queue:empty() do
-    local curPath: {Point}, curMeasure: number = queue:pop()
+    local curPath: {Point} = queue:pop()
+    windowBestDepth = math.max(windowBestDepth, #curPath)
     local lastPoint = curPath[#curPath]
     -- Got to the END node - finished the path
     if lastPoint == End then
@@ -337,12 +253,17 @@ return function (pathFolder: Folder): { Point }
       local curDirection: Vector3 = newPoint.Position - lastPoint.Position
       local angle: number = angleBetween(curDirection, lastDirection)
       local normalizedAngle: number = angle / math.pi
-      if math.abs(normalizedAngle) >= 2/3 then continue end
+      if math.abs(normalizedAngle) >= maxBendFraction then continue end
+      local incomingLength: number = if #curPath > 1
+        then (lastPoint.Position - curPath[#curPath - 1].Position).Magnitude
+        else math.huge
+      local tangentLength: number = math.min(incomingLength, curDirection.Magnitude) / 2
+      if math.abs(angle) >= 2 * math.atan(tangentLength / minTurnRadius) then continue end
       if newPoint.Direction ~= nil and math.abs(angleBetween(curDirection, -newPoint.Direction) / math.pi) > 1/4 then continue end
       if lastPoint.Direction ~= nil and math.abs(angleBetween(curDirection, lastPoint.Direction) / math.pi) > 1/4 then continue end
       
       -- Check if the path does not go through a prebuilt structure (unless the starting node or the ending node belongs to the structure)
-      local currentColliders: { BasePart } = {}
+      local currentColliders: { Instance } = {}
       for _, collider: Instance in ipairs(CollidersFolder:GetChildren()) do
         if not collider:IsA('BasePart') then continue end
         if lastPoint.Collider == collider or newPoint.Collider == collider then continue end
@@ -386,22 +307,40 @@ return function (pathFolder: Folder): { Point }
     j = (j + 1)
     if j % 200 == 0 then
       genPath(curPath)
-      print(curMeasure, #curPath)
       -- Trim the queue
       --[[ Trimming by queue size
       local newSize = queue.current_size * (1 - trimPercentage)
       while queue.current_size > newSize do queue:pop() end
       ]]
-      -- Trimming by path size
-      local newPathSize = math.floor(#curPath * (1 - trimPercentage))
-      -- TODO: Adaptive trimPercentage
-      for i = queue.current_size, 1, -1 do
-        local val = queue.heap_val[i]
-        if #val > newPathSize then -- Remove
-          queue.heap_val[i], queue.heap_pri[i] = queue.heap_val[queue.current_size], queue.heap_pri[queue.current_size]
-          queue.heap_val[queue.current_size], queue.heap_pri[queue.current_size] = nil, nil
-          queue.current_size -= 1
-          queue:sink(i)
+      --[[
+        Trimming by path size. Every 200 expansions without reaching end, deeper queued partial paths
+        are dropped, forcing the search back onto shorter prefixes and into different branches.
+      ]]
+      if previousWindowBestDepth ~= nil then
+        if windowBestDepth > previousWindowBestDepth then
+          currentTrim = math.max(minTrimPercentage, currentTrim - trimStep)
+        else
+          currentTrim = math.min(maxTrimPercentage, currentTrim + trimStep)
+        end
+      end
+      previousWindowBestDepth = windowBestDepth
+      windowBestDepth = 0
+
+      local newPathSize: number = math.floor(#curPath * (1 - currentTrim))
+
+      local keptValues: { { Point } } = {}
+      local keptPriorities: { number } = {}
+      for i = 1, queue.current_size do
+        if #queue.heap_val[i] <= newPathSize then
+          table.insert(keptValues, queue.heap_val[i])
+          table.insert(keptPriorities, queue.heap_pri[i])
+        end
+      end
+
+      if #keptValues > 0 and #keptValues < queue.current_size then
+        queue:initialize()
+        for i: number, value: {Point} in keptValues do
+          queue:put(value, keptPriorities[i])
         end
       end
       task.wait()

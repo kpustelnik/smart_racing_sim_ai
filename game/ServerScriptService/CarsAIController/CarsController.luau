@@ -8,10 +8,22 @@ local CheckpointsController = require(script.Parent:WaitForChild('CheckpointsCon
 local ServerStorage = game:GetService('ServerStorage')
 local CarModels: Instance = ServerStorage:WaitForChild('CarModels')
 local AllCarScripts = script.Parent.Parent:WaitForChild('Car')
-local CarScripts: Folder = AllCarScripts:WaitForChild('CarScripts')
+local CarScripts: Folder = AllCarScripts:WaitForChild('CarScripts') :: Folder
 local Recolor = require(AllCarScripts:WaitForChild('Recolor'))
 
 local CarsController = {}
+
+local IncludePrevAction: boolean = true
+local ACTION_DIM: number = 3
+
+local function readNumberAttribute(instance: Instance, attribute: string, fallback: number): number
+  local value: unknown? = instance:GetAttribute(attribute)
+  if typeof(value) ~= 'number' then return fallback end
+
+  local number: number = value :: number
+  if number ~= number then return fallback end -- NaN
+  return number
+end
 
 CarsController.GetSpawns = function (): { BasePart }
   local Spawns: { BasePart } = {}
@@ -116,24 +128,17 @@ CarsController.GetRaycasts = function (car: Model): { number }?
   local Config: any = CarsController.LoadConfig(car)
   if Config == nil then return end
 
-  local ConfigRays: { RayConfig } = Config.Rays
-  local Result: { number } = {}
-  for _, rc: RayConfig in ipairs(ConfigRays) do
-    local originCFrame: CFrame = rc.Source.CFrame
-    if rc.IgnoreXZRotation then
-      originCFrame = CFrame.new(rc.Source.Position)
-      local _, Y: number, _ = rc.Source.CFrame:ToEulerAnglesYXZ()
-      originCFrame *= CFrame.Angles(0, Y, 0) -- Only preserve the Y rotation
-    end
-
-    local targetPos: Vector3 = (originCFrame * CFrame.new(rc.Direction)).Position
-    local startPos: Vector3 = originCFrame.Position
+  local filters: { [string]: RaycastParams } = {}
+  local function filterFor(ignoreCars: boolean, ignoreTrack: boolean): RaycastParams
+    local key: string = `{ignoreCars}/{ignoreTrack}`
+    local cached: RaycastParams? = filters[key]
+    if cached ~= nil then return cached end
 
     local params: RaycastParams = RaycastParams.new()
     params.FilterType = Enum.RaycastFilterType.Exclude
     params.RespectCanCollide = true
-    local IgnoredDescendants = {}
-    if rc.IgnoreCars then
+    local IgnoredDescendants: { Instance } = {}
+    if ignoreCars then
       table.insert(IgnoredDescendants, CarsFolder)
     else
       local Env: unknown? = car:GetAttribute('ENV')
@@ -147,19 +152,39 @@ CarsController.GetRaycasts = function (car: Model): { number }?
       table.insert(IgnoredDescendants, car) -- Ignore the car itself
     end
     -- Ignore the track if cars should be detected
-    local IgnoreTrack: boolean = if rc.IgnoreTrack ~= nil then rc.IgnoreTrack else true
-    if IgnoreTrack then
-      local RoadParts: { Instance } = CollectionService:GetTagged('ROAD')
-      for _, roadPart: Instance in ipairs(RoadParts) do
+    if ignoreTrack then
+      for _, roadPart: Instance in ipairs(CollectionService:GetTagged('ROAD')) do
         if roadPart:IsA('BasePart') then table.insert(IgnoredDescendants, roadPart) end
       end
     end
     params.FilterDescendantsInstances = IgnoredDescendants
 
-    local offset = if rc.Offset ~= nil then rc.Offset else if rc.IgnoreCars then DefaultRaycastOffset else Vector3.new(0, 1, 0)
-    local raycastResult: RaycastResult<BasePart>? = Workspace:Raycast(startPos + offset, targetPos - startPos, params)
+    filters[key] = params
+    return params
+  end
 
-    local hitPosition: Vector3 = if raycastResult ~= nil then raycastResult.Position else targetPos
+  local ConfigRays: { RayConfig } = Config.Rays
+  local Result: { number } = {}
+  for _, rc: RayConfig in ipairs(ConfigRays) do
+    local originCFrame: CFrame = rc.Source.CFrame
+    if rc.IgnoreXZRotation then
+      originCFrame = CFrame.new(rc.Source.Position)
+      local _, Y: number, _ = rc.Source.CFrame:ToEulerAnglesYXZ()
+      originCFrame *= CFrame.Angles(0, Y, 0) -- Only preserve the Y rotation
+    end
+
+    local targetPos: Vector3 = (originCFrame * CFrame.new(rc.Direction)).Position
+    local startPos: Vector3 = originCFrame.Position
+
+    local IgnoreTrack: boolean = if rc.IgnoreTrack ~= nil then rc.IgnoreTrack else true
+    local params: RaycastParams = filterFor(rc.IgnoreCars == true, IgnoreTrack)
+
+    local offset = if rc.Offset ~= nil then rc.Offset else if rc.IgnoreCars then DefaultRaycastOffset else Vector3.new(0, 1, 0)
+    local rayOrigin: Vector3 = startPos + offset
+    local rayVector: Vector3 = targetPos - startPos
+    local raycastResult: RaycastResult<BasePart>? = Workspace:Raycast(rayOrigin, rayVector, params)
+
+    local hitPosition: Vector3 = if raycastResult ~= nil then raycastResult.Position else rayOrigin + rayVector
     
     if EnableDebugPartsRays then -- Debug parts
       local part: Part = Instance.new("Part")
@@ -168,9 +193,9 @@ CarsController.GetRaycasts = function (car: Model): { number }?
       part.CanTouch = false
       part.CanQuery = false
       part.BrickColor = if rc.IgnoreCars then BrickColor.new("Really red") else BrickColor.new("Bright blue")
-      part.Size = Vector3.new(1, 1, (hitPosition - startPos).Magnitude)
+      part.Size = Vector3.new(1, 1, (hitPosition - rayOrigin).Magnitude)
       part.Parent = car
-      part.CFrame = CFrame.lookAt((hitPosition + startPos) / 2, hitPosition)
+      part.CFrame = CFrame.lookAt((hitPosition + rayOrigin) / 2, hitPosition)
       part.Transparency = 0.5
       task.defer(function(): () task.wait(0.1); part:Destroy() end)
     end
@@ -187,10 +212,10 @@ CarsController.GetRaycasts = function (car: Model): { number }?
       task.defer(function(): () task.wait(0.1); part:Destroy() end)
     end
 
-    local Distance: number = (hitPosition - startPos).Magnitude
+    local Distance: number = (hitPosition - rayOrigin).Magnitude
     table.insert(Result, Distance / rc.Direction.Magnitude)
     local Dot: number = 1
-    if raycastResult ~= nil then Dot = (targetPos - startPos).Unit:Dot(raycastResult.Normal) end
+    if raycastResult ~= nil then Dot = rayVector.Unit:Dot(raycastResult.Normal) end
     if rc.IncludeNormal then table.insert(Result, Dot) end
   end
 
@@ -222,6 +247,8 @@ export type CarData = {
   CurrentLap: number,
   LastCheckpoint: number,
   LastObservation: CarObservation?,
+  LastAction: { number }?,
+  FrozenVelocities: { [BasePart]: { Linear: Vector3, Angular: Vector3 } }?,
   LastUpdateTime: number?,
   IsTouchingWall: boolean,
   IsTouchingAgent: boolean,
@@ -236,13 +263,15 @@ export type CarData = {
   FreezeStart: number?
 }
 
+CarsController.CurrentCars = {} :: { [string]: CarData? }
+
 CarsController.CleanupCar = function (Id: string): ()
   local carData: CarData? = CarsController.CurrentCars[Id]
   if carData == nil then return end
 
   while #carData.Connections > 0 do
-    local conn: RBXScriptConnection = table.remove(carData.Connections)
-    conn:Disconnect()
+    local conn: RBXScriptConnection? = table.remove(carData.Connections)
+    if conn ~= nil then conn:Disconnect() end
   end
 
   local carModel: Model? = carData.Model
@@ -254,16 +283,16 @@ CarsController.CleanupCar = function (Id: string): ()
 end
 
 CarsController.ApplyHighlightColor = function (model: Model, color: Color3?): ()
-  local highlight: Instance? = model:FindFirstChildWhichIsA('Highlight')
+  local existing: Highlight? = model:FindFirstChildWhichIsA('Highlight') :: Highlight?
   if color == nil then
-    if highlight ~= nil then
-      highlight:Destroy()
+    if existing ~= nil then
+      existing:Destroy()
     end
     return
   end
 
-  if highlight == nil then
-    highlight = Instance.new('Highlight')
+  local highlight: Highlight = existing or Instance.new('Highlight')
+  if existing == nil then
     highlight.Adornee = model
     highlight.Parent = model
     highlight.FillTransparency = 0.7
@@ -274,6 +303,40 @@ CarsController.ApplyHighlightColor = function (model: Model, color: Color3?): ()
 end
 
 CarsController.ApplyColor = function (model: Model, color: Color3): () return Recolor(model, color) end
+
+local wallConnections: { RBXScriptConnection } = {}
+
+local function findCarDataForPart(part: BasePart): CarData?
+  local model: Instance? = part:FindFirstAncestorOfClass('Model')
+  while model ~= nil do
+    if model.Parent == CarsFolder then
+      local agentId: unknown? = model:GetAttribute('AGENT_ID')
+      if typeof(agentId) == 'string' then return CarsController.CurrentCars[agentId] end
+      return nil
+    end
+    model = model:FindFirstAncestorOfClass('Model')
+  end
+  return nil
+end
+
+CarsController.EnsureWallEventsConnected = function (): ()
+  if #wallConnections > 0 then return end
+
+  local function onWallTouched(hit: BasePart): ()
+    local carData: CarData? = findCarDataForPart(hit)
+    if carData ~= nil then carData.IsTouchingWall = true end
+  end
+
+  for _, wall: Instance in ipairs(CollectionService:GetTagged('WALL')) do
+    if not wall:IsA('BasePart') then continue end
+    table.insert(wallConnections, wall.Touched:Connect(onWallTouched))
+  end
+end
+
+CarsController.DisconnectWallEvents = function (): ()
+  for _, connection: RBXScriptConnection in ipairs(wallConnections) do connection:Disconnect() end
+  table.clear(wallConnections)
+end
 
 CarsController.SetupCarEvents = function (Id: string): ()
   local carData: CarData? = CarsController.CurrentCars[Id]
@@ -290,27 +353,13 @@ CarsController.SetupCarEvents = function (Id: string): ()
   end)
   table.insert(connections, destroyConn)
 
-  -- Walls collision detection
-  local wallTouchedHandler = function (hit: BasePart): ()
-    if hit:IsDescendantOf(carModel) then
-      carData.IsTouchingWall = true
-    end
-  end
-  local Walls = CollectionService:GetTagged('WALL')
-  for _, Wall: Instance in ipairs(Walls) do
-    if not Wall:IsA('BasePart') then continue end
-
-    local wallTouchedConn: RBXScriptConnection = Wall.Touched:Connect(wallTouchedHandler)
-    table.insert(connections, wallTouchedConn)
-  end
-
   -- Cars collision detectionue end
-  local chassis = carModel:FindFirstChild('Chassis')
-  if chassis ~= nil then
+  local chassis: Instance? = carModel:FindFirstChild('Chassis')
+  if chassis ~= nil and chassis:IsA('BasePart') then
     local carPartTouchedConn: RBXScriptConnection = chassis.Touched:Connect(function (hit: BasePart): ()
       for _, otherCarModel: Instance in ipairs(CarsFolder:GetChildren()) do
         if otherCarModel:IsA('Model') and otherCarModel ~= carModel and hit:IsDescendantOf(otherCarModel) then
-          local env: string? = otherCarModel:GetAttribute('ENV')
+          local env: unknown? = otherCarModel:GetAttribute('ENV')
           if env ~= nil and env == carModel:GetAttribute('ENV') then
             carData.IsTouchingAgent = true
             break
@@ -324,11 +373,11 @@ end
 
 export type CarObservation = { number }
 
-CarsController.RetrieveObservation = function (Id: string): (CarObservation?, CarObservation)
+CarsController.RetrieveObservation = function (Id: string): (CarObservation?, CarObservation?)
   local carData: CarData? = CarsController.CurrentCars[Id]
-  if carData == nil then return end
+  if carData == nil then return nil, nil end
   local carModel: Model? = carData.Model
-  if carModel == nil then return end
+  if carModel == nil then return nil, nil end
 
   local carCFrame: CFrame = carModel:GetPivot()
   local carPosition = carCFrame.Position
@@ -344,21 +393,29 @@ CarsController.RetrieveObservation = function (Id: string): (CarObservation?, Ca
   if rc == nil then error('Failed to get raycasts for car ' .. Id) end
   for _, value: number in ipairs(rc) do table.insert(obs, value) end -- Copy over
 
-  local nitroStatus: number = carEngine:GetAttribute('_nitro') :: any
-  local velocityStatus: number = carEngine:GetAttribute('_speed') :: any
-  local maxVelocity: number = carEngine:GetAttribute('forwardMaxSpeed') :: any
+  local nitroStatus: number = readNumberAttribute(carEngine, '_nitro', 0)
+  local velocityStatus: number = readNumberAttribute(carEngine, '_speed', 0)
+  local maxVelocity: number = readNumberAttribute(carEngine, 'forwardMaxSpeed', 0)
   table.insert(obs, nitroStatus) -- Nitro status
-  table.insert(obs, math.clamp(velocityStatus / maxVelocity, -1, 1)) -- Relative velocity
+  -- Relative velocity
+  table.insert(obs, if maxVelocity > 0 then math.clamp(velocityStatus / maxVelocity, -1, 1) else 0)
   
   local realOrientation: number = if trackOrientation ~= nil then trackOrientation / math.pi else 0
   local isReverse: number = if realOrientation > 0.5 or realOrientation < -0.5 then 1 else 0
   table.insert(obs, isReverse)
+
+  if IncludePrevAction then
+    -- Zeroes on the first step of an episode, when there is no preceding action.
+    local lastAction: { number }? = carData.LastAction
+    for i = 1, ACTION_DIM do
+      table.insert(obs, if lastAction ~= nil then lastAction[i] else 0)
+    end
+  end
   
   carData.LastObservation = obs
   return obs, lastObservation
 end
 
-CarsController.CurrentCars = {} :: { [string]: CarData? }
 CarsController.SetupCar = function (Id: string, EnvId: string, Model: string, Spawn: BasePart): CarData?
   CarsController.CleanupCar(Id)
 
@@ -367,10 +424,11 @@ CarsController.SetupCar = function (Id: string, EnvId: string, Model: string, Sp
   if CarInstance == nil then return nil end
 
   CarInstance:SetAttribute('ENV', EnvId)
+  CarInstance:SetAttribute('AGENT_ID', Id)
 
   local carInputs = CarInstance:WaitForChild('Inputs')
   local carEngine = CarInstance:WaitForChild('Engine')
-  local carController = require(CarInstance:WaitForChild("Scripts"):WaitForChild("Controller"))
+  local carController = (require :: any)(CarInstance:WaitForChild("Scripts"):WaitForChild("Controller"))
   local ct: number = tick()
   local carData: CarData = {
     Connections = {},
@@ -388,6 +446,8 @@ CarsController.SetupCar = function (Id: string, EnvId: string, Model: string, Sp
     CurrentLap = 0,
     LastCheckpoint = 1,
     LastObservation = nil,
+    LastAction = nil,
+    FrozenVelocities = nil,
     LastUpdateTime = nil,
     IsTouchingWall = false,
     IsTouchingAgent = false,
@@ -404,6 +464,7 @@ CarsController.SetupCar = function (Id: string, EnvId: string, Model: string, Sp
 
   CarsController.CurrentCars[Id] = carData
 
+  CarsController.EnsureWallEventsConnected()
   CarsController.SetupCarEvents(Id)
   CarsController.RetrieveObservation(Id)
   return carData

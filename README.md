@@ -2,7 +2,7 @@
 
 ## Overview
 
-This repository contains a ready to run Roblox Reinforced Learning environment (Gymnasium, Stable Baselines 3, Pettingzoo and Supersuit).
+This repository contains a ready to run Roblox Reinforcement Learning environment (Gymnasium, Stable Baselines 3, Pettingzoo and Supersuit).
 Video preview: https://www.youtube.com/watch?v=23tVNKUoSOs
 It is composed of the Roblox environment part and Python backend part that communicate with each other via WebSocket 
 The WebSocket-based bridge enables training AI agents to drive cars using algorithms like PPO and SAC.
@@ -10,7 +10,7 @@ Repository may easily be extended by different models and libraries simply by ut
 Roblox environment has few examples of vehicles added along with few methods of race track generation (the shape and cosmetics are being generated separately).
 
 It is possible to train the agents in parallel even allowing them to collide with each others within a custom virtual environment.
-It's also possible to simulate few virtual environment at one time.
+Several virtual environments can also be simulated at once, isolated from each other inside a single Roblox server.
 
 ```
 ┌─────────────────────┐         WebSocket          ┌─────────────────────┐
@@ -31,11 +31,13 @@ It's also possible to simulate few virtual environment at one time.
 
 ```
 server/
-├── main.py                 # Main entry point with CLI
-├── ARCHITECTURE.md        # This file
+├── main.py                # Entry point, FastAPI app, WebSocket + CLI
+├── requirements.txt       # Pinned dependencies
 └── models/
     ├── __init__.py        # Model registry & exports
     ├── base.py            # TrainingBridge facade + ModelTrainer ABC
+    ├── env.py             # PettingZoo environment + frame stacking + freeze callback
+    ├── latency.py         # Bridge delay instrumentation (see --latency)
     ├── ppo.py             # PPO trainer implementation
     └── sac.py             # SAC trainer implementation
 ```
@@ -60,7 +62,16 @@ python main.py -h                         # View help
 python main.py --model-type ppo           # Train with PPO (default)
 python main.py -m sac --port 8080         # Train with SAC on custom port
 python main.py --list-models              # List available model types
+python main.py --latency                  # Also measure bridge delays
 ```
+
+**HTTP endpoints:**
+
+| Route | Description |
+|-------|-------------|
+| `GET /` | Server status, active model, whether latency measurement is on |
+| `GET /latency` | Rolling mean/p50/p90/p99/max for the `transport` and `step` trackers, plus observation-timeout counts. Requires `--latency` |
+| `WS /ws/{model_id}` | The Roblox client connects here |
 
 ### 2. DataBridge (Internal)
 
@@ -111,14 +122,15 @@ class ModelTrainer(ABC):
     def __init__(self, bridge: TrainingBridge, model_id: str): ...
     
     @abstractmethod
-    def create_model(self, env) -> Any: ...
+    def create_model(self, env, tensorboard_log: Optional[str] = None) -> Any: ...
+
+    # Builds the wrapped vector env (stacking, vectorising, normalisation)
+    def build_env(self, training: bool) -> Any: ...
     
     # Trains the model
-    @abstractmethod
     def train(self) -> None: ...
     
     # Runs the model in inference mode
-    @abstractmethod
     def use(self) -> None: ...
 ```
 
@@ -134,16 +146,16 @@ PettingZooWSEnv
     ├── Handles observation/action spaces
     │
     └── Pipeline:
-        env = PettingZooWSEnv(bridge, num_agents=5)
-        env = ss.frame_stack_v1(env, stack_size=4)      # Temporal info
-        env = ss.pettingzoo_env_to_vec_env_v1(env)      # Vectorize
-        env = SB3VecEnvWrapper(env)                     # SB3 compat
-        env = VecNormalize(env, norm_obs=True, ...)     # Normalize
+        env = PettingZooWSEnv(bridge, ..., stack_size=4)
+        env = ss.pettingzoo_env_to_vec_env_v1(env)        # Vectorize
+        env = SB3VecEnvWrapper(env)                       # SB3 compat
+        env = VecMonitor(env)                             # Unnormalized returns
+        env = VecNormalize(env, norm_obs=True, ...)       # Normalize
 ```
 
-## 6. RL Model Hyperparameters
+### 6. RL Model Hyperparameters
 
-### PPO (Proximal Policy Optimization)
+#### PPO (Proximal Policy Optimization)
 
 ```python
 HYPERPARAMETERS = {
@@ -161,7 +173,7 @@ HYPERPARAMETERS = {
 - Good for continuous action spaces
 - Lower sample efficiency but more stable
 
-### SAC (Soft Actor-Critic)
+#### SAC (Soft Actor-Critic)
 
 ```python
 HYPERPARAMETERS = {
@@ -180,7 +192,7 @@ HYPERPARAMETERS = {
 - Higher sample efficiency
 - More complex, requires larger batch sizes
 
-### Built-in models
+#### Built-in models
 Built-in models are being automatically saved (along with the VecNormalize layers). Furthermore Tensorboard logs are being prepared for further inspection.
 
 ---
@@ -202,7 +214,8 @@ Built-in models are being automatically saved (along with the VecNormalize layer
 ```json
 {
     "car_0_env_xxx": {
-        "obs": [raycasts..., nitro, velocity, isReverse],
+        "obs": [raycasts..., nitro, velocity, isReverse, prevAction...],
+        "last_observation": [ ... ],
         "reward": 15.5,
         "terminated": false,
         "truncated": false
@@ -347,6 +360,7 @@ Commands received from Python server:
 | `UPDATE_COLLISIONS` | `{enable_collisions: boolean}` | Toggle inter-agent collisions |
 | `CLOSE` | `{}` | Cleanup single environment |
 | `CLOSE_ALL` | `{}` | Cleanup all environments |
+| `PING` | `{id: any}` | Echoed straight back as `__pong` without touching the simulation, so the round trip measures transport only |
 
 ### Car Physics System
 
@@ -441,16 +455,19 @@ if isSharedFateMode then
   if isLastPosition then reward -= 1 end
 end
 
+local terminalPenalty: number = 0
 if isTouchingAnotherAgent and areCollisionsEnabled then
-  reward -= 60
+  terminalPenalty += AgentCollisionPenalty -- -60, charged on top of the terminal value
   markAgentForTermination()
 end
 
-if truncationPending or terminationPending then
-  return -40 -- Always return -40 reward if the agent is being truncated or terminated
-else
-  return reward
+if terminationPending then
+  return TerminationReward + terminalPenalty  -- -40 or -100 (in total) for agent contact
 end
+if truncationPending then
+  return TruncationReward + terminalPenalty   -- 0
+end
+return reward
 ```
 
 Agent is automatically being truncated if they do not make any track progress for a given amount of time (or the model gets removed from the map). Agent is being terminated by default if it hits any wall.
@@ -495,7 +512,9 @@ Track generation has two phases:
 2. **Finalizer**: Converts path to visual road segments
 
 ```luau
-TrackGeneration('Main', 'Main')  -- Generator: Main, Finalizer: Main
+local GenerationMethod: string = 'Main'      -- Methods/<name>.luau
+local Finalizer: string = 'MainTile'         -- Finalizers/<name>.luau
+TrackGeneration(GenerationMethod, Finalizer) -- Returns false on failure
 ```
 
 ### Generators
@@ -513,6 +532,9 @@ Uses A*-like pathfinding with constraint satisfaction:
 | `maxDistance` | 500 | Max edge length |
 | `pathDistance` | 100 | Min distance of node from existing path |
 | `PrebuiltStructureMargin` | 30 | Min distance of path to pre-built structures |
+| `maxBendFraction` | 2/3 | Absolute cap on the turn at a waypoint, as a fraction of pi |
+| `minTurnRadius` | 60 | Smallest turn radius the generator will produce, in studs |
+
 
 Constraints:
 - No self-intersecting paths
@@ -539,7 +561,7 @@ The search tree is huge and therefore quite often trimmed to find the solution f
 
 Offloads path generation to Python server using OR-Tools CP-SAT solver was attempted but the model had too many constraints and therefore could not be reasonably used. We determined that it is better to stick to the current heuristic-driven greedy solution.
 
-### Finishers (Cosmetics generators)
+### Finalizers (Cosmetics generators)
 
 Nodes picked for track generation are being used to further generate the actual track. Catmull-Rom spline helps to create a smooth transition between nodes. Some nodes have pre-set direction (such as pre-built structures) that is being used to determine the some of the spline points. For basic nodes the direction is based on their neighbouring nodes.
 
@@ -549,7 +571,7 @@ Few finishers were implemented as we were trying to achieve the best quality pos
 - **MainParts** uses similar approach to the MainTile but instead of ensuring connectivity the parts are being placed along the spline just making sure that they do not collide. They are further used to generate a smooth continuous mesh (Also uses the forward and backward approach).
 - **Main** best tested approach so far. Spline points are being probed more frequently. Sometimes they in fact overlap but an algorithm is put in place to make sure that no points are allowed to be placed behind already placed ones (Also uses the forward and backward approach).
 
-## Pre-built structuers
+## Pre-built structures
 
 Pre-built structures such as bridges, roundabouts etc. may be created and have specific configuration. First of all they may contain some custom textures. Then static `Nodes` may be placed into them
 
@@ -569,12 +591,13 @@ end
 
 Pre-built structures and terrain generation were out of scope of this projects as this may be easily achieved by simple programs or utilizing existing [Roblox engine tools](https://create.roblox.com/docs/studio/terrain-editor).
 
-### Installation
+## Installation
 
-1. Install Roblox studio
-2. Install [Rokit](https://github.com/rojo-rbx/rokit) to install other packages
-3. Install packages such as [Rojo](https://github.com/rojo-rbx/rojo) to sync objects from the filesystem
-4. Run the game (server will connect via WebSocket)
+1. Install Roblox Studio
+2. Install [Rokit](https://github.com/rojo-rbx/rokit) to manage the toolchain
+3. Run `rokit install` to get the pinned tools from `rokit.toml` ([Rojo](https://github.com/rojo-rbx/rojo) for filesystem sync, plus `stylua`, `selene` and `luau-lsp`)
+4. `pip install -r server/requirements.txt`, then start the backend (`python server/main.py`)
+5. Run the game - the client connects via WebSocket
 
 ---
     

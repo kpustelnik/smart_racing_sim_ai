@@ -401,7 +401,7 @@ function doExtend(faceA, faceB, mode): ()
 				return
 			end
 		else
-			local extendableA: number = (localDimensionA * faceA.Object.Size).magnitude
+			local extendableA: number = (localDimensionA * faceA.Object.Size).Magnitude
 			if getNormal(faceA):Dot(getNormal(faceB)) > 0 then
 				lenA = -lenA
 			end
@@ -457,8 +457,8 @@ function doExtend(faceA, faceB, mode): ()
 	-- Are both extents doable?
 	-- Note: Negative amounts to extend by *are* allowed, but only
 	-- up to the size of the part on the dimension being extended on.
-	local extendableA: number = (localDimensionA * faceA.Object.Size).magnitude
-	local extendableB: number = (localDimensionB * faceB.Object.Size).magnitude
+	local extendableA: number = (localDimensionA * faceA.Object.Size).Magnitude
+	local extendableB: number = (localDimensionB * faceB.Object.Size).Magnitude
 	if lenA < -extendableA then
 		return
 	end

@@ -1,4 +1,5 @@
 --!strict
+--!nolint UnreachableCode
 
 local Workspace = game:GetService("Workspace")
 local CollectionService = game:GetService("CollectionService")
@@ -8,6 +9,8 @@ local PrebuiltObjects = Map:WaitForChild('Prebuilt')
 local HttpService = game:GetService("HttpService")
 
 local Types = require(script.Parent.Parent:WaitForChild("types"))
+local PathGeometry = require(script.Parent.Parent:WaitForChild("PathGeometry"))
+local BoundingBox = require(game:GetService("ServerScriptService"):WaitForChild("Utilities"):WaitForChild("BoundingBox"))
 type Point = Types.Point
 
 -- Options
@@ -17,111 +20,9 @@ local maxDistance: number = 500
 local PrebuiltStructureMargin = 30
 local pathDistance: number = 120
 
--- Functions
-
--- Angle between two vectors
-local angleBetween = function (a: Vector3, b: Vector3): number return math.atan2(a.X * b.Z - a.Z * b.X, a.X * b.X + a.Z * b.Z) end
-
--- Orientation of the ordered triplet (p, q, r)
-local orientation2d = function (p: Vector3, q: Vector3, r: Vector3): number
-  local value = (q.Z - p.Z) * (r.X - q.X) - (q.X - p.X) * (r.Z - q.Z)
-  if math.abs(value) < 0.0001 then
-    return 0
-  else
-    return if value > 0 then 1 else 2
-  end
-end
-
--- Checks if two lines intersect
-local intersects = function (p1: Vector3, q1: Vector3, p2: Vector3, q2: Vector3): boolean
-  local o1: number = orientation2d(p1, q1, p2)
-  local o2: number = orientation2d(p1, q1, q2)
-  local o3: number = orientation2d(p2, q2, p1)
-  local o4: number = orientation2d(p2, q2, q1)
-
-  if o1 ~= o2 and o3 ~= o4 then return true end
-  return false
-end
-
--- Returns minimal distance from point to line s -> e
-local getPathDistance = function (s: Vector3, e: Vector3, point: Vector3): number
-  local ray = Ray.new(s, e-s).Unit
-  local cp: Vector3 = ray:ClosestPoint(point)
-  local mag: number = (s - e).Magnitude
-  if (cp - s).Magnitude > mag then
-    return (e - point).Magnitude
-  elseif (cp - e).Magnitude > mag then
-    return (s - point).Magnitude
-  else
-    return (cp - point).Magnitude
-  end
-end
-
---[[
-	Micro-optimized code for computing a local space and the global space
-	bounding box for a set of parts and attachments as fast as possible.
-]]
-local function computeTwoBoundingBoxes(basisCFrame1: CFrame, allParts: { BasePart })
-	local inverseBasis1: CFrame = basisCFrame1:Inverse()
-	local xmin1: number, xmax1: number = math.huge, -math.huge
-	local ymin1: number, ymax1: number = math.huge, -math.huge
-	local zmin1: number, zmax1: number = math.huge, -math.huge
-	local xmin2: number, xmax2: number = math.huge, -math.huge
-	local ymin2: number, ymax2: number = math.huge, -math.huge
-	local zmin2: number, zmax2: number = math.huge, -math.huge
-
-	for _, part: BasePart in ipairs(allParts) do
-    local cframe = part.CFrame
-    local csize: Vector3 = part.Size
-    local sx: number, sy: number, sz: number = csize.X, csize.Y, csize.Z
-
-    -- Calculation for bounding box in the space of basisCFrame1
-    local localCFrame1: CFrame = inverseBasis1 * cframe -- put cframe in our local basis
-    local _, _, _,
-      t00: number, t01: number, t02: number,
-      t10: number, t11: number, t12: number,
-      t20: number, t21: number, t22: number = localCFrame1:components()
-    local hw1: number = 0.5 * (math.abs(sx * t00) + math.abs(sy * t01) + math.abs(sz * t02))
-    local hh1: number = 0.5 * (math.abs(sx * t10) + math.abs(sy * t11) + math.abs(sz * t12))
-    local hd1: number = 0.5 * (math.abs(sx * t20) + math.abs(sy * t21) + math.abs(sz * t22))
-    local x1: number, y1: number, z1: number = localCFrame1.X, localCFrame1.Y, localCFrame1.Z
-    xmin1 = math.min(xmin1, x1 - hw1)
-    xmax1 = math.max(xmax1, x1 + hw1)
-    ymin1 = math.min(ymin1, y1 - hh1)
-    ymax1 = math.max(ymax1, y1 + hh1)
-    zmin1 = math.min(zmin1, z1 - hd1)
-    zmax1 = math.max(zmax1, z1 + hd1)
-
-    -- Calculation for the bounding box in the global coordinate space
-    _, _, _,
-      t00, t01, t02,
-      t10, t11, t12,
-      t20, t21, t22 = cframe:components()
-    local hw2: number = 0.5 * (math.abs(sx * t00) + math.abs(sy * t01) + math.abs(sz * t02))
-    local hh2: number = 0.5 * (math.abs(sx * t10) + math.abs(sy * t11) + math.abs(sz * t12))
-    local hd2: number = 0.5 * (math.abs(sx * t20) + math.abs(sy * t21) + math.abs(sz * t22))
-    local x2: number, y2: number, z2: number = cframe.X, cframe.Y, cframe.Z
-    xmin2 = math.min(xmin2, x2 - hw2)
-    xmax2 = math.max(xmax2, x2 + hw2)
-    ymin2 = math.min(ymin2, y2 - hh2)
-    ymax2 = math.max(ymax2, y2 + hh2)
-    zmin2 = math.min(zmin2, z2 - hd2)
-    zmax2 = math.max(zmax2, z2 + hd2)
-	end
-
-	local localBoundingBoxOffset: Vector3 = Vector3.new(
-		0.5 * (xmin1 + xmax1),
-		0.5 * (ymin1 + ymax1),
-		0.5 * (zmin1 + zmax1)
-	)
-	local localBoundingBoxSize: Vector3 = Vector3.new(
-		xmax1 - xmin1,
-		ymax1 - ymin1,
-		zmax1 - zmin1
-	)
-
-	return localBoundingBoxOffset, localBoundingBoxSize
-end
+local angleBetween = PathGeometry.angleBetween
+local intersects = PathGeometry.intersects
+local getPathDistance = PathGeometry.distanceToSegment
 
 return function (pathFolder: Folder): { Point }
   assert(SpawnerPart:IsA('BasePart'), 'Spawner part should be a part')
@@ -138,18 +39,21 @@ return function (pathFolder: Folder): { Point }
   -- Add other colliders
   for _, part: Instance in ipairs(CollectionService:GetTagged('COLLIDER')) do if part:IsA('BasePart') then part.Parent = CollidersFolder end end
 
-  local random: Random = Random.new(Workspace:GetAttribute("SEED"))
+  local seedAttribute: unknown? = Workspace:GetAttribute("SEED")
+  local seed: number = if typeof(seedAttribute) == "number" then seedAttribute else os.time()
+  local random: Random = Random.new(seed)
   local Points: { Point } = {}
 
   local PrebuiltConfigs: { [Instance]: any? } = {}
 
   for _, object: Instance in ipairs(PrebuiltObjects:GetChildren()) do
+    if not object:IsA('PVInstance') then continue end
     local objParts: { BasePart } = {}
     for _, part in ipairs(object:GetDescendants()) do
       if part:IsA('BasePart') then table.insert(objParts, part) end
     end
     local cf: CFrame = object:GetPivot()
-    local boundingBoxOffset: CFrame, boundingBoxSize: Vector3 = computeTwoBoundingBoxes(object:GetPivot(), objParts)
+    local boundingBoxOffset: Vector3, boundingBoxSize: Vector3 = BoundingBox.compute(cf, objParts)
     boundingBoxSize = Vector3.new(boundingBoxSize.X, 1000, boundingBoxSize.Z)
 
     local ColliderPart: Part = Instance.new('Part')
@@ -189,8 +93,10 @@ return function (pathFolder: Folder): { Point }
       PrebuiltConfigs[object] = Config
       if Config.NodeMap ~= nil then
         for from: string, to: string in pairs(Config.NodeMap) do
-          if objectPoints[from] ~= nil and objectPoints[to] ~= nil then
-            objectPoints[from].Next = objectPoints[to]
+          local fromPoint: Point? = objectPoints[from]
+          local toPoint: Point? = objectPoints[to]
+          if fromPoint ~= nil and toPoint ~= nil then
+            fromPoint.Next = toPoint
           end
         end
       end
@@ -300,7 +206,7 @@ return function (pathFolder: Folder): { Point }
 
         if cpm2D[a][b] then -- (Condition 6)
           -- Check if the path does not go through a prebuilt structure (unless the starting node or the ending node belongs to the structure)
-          local currentColliders: { BasePart } = {}
+          local currentColliders: { Instance } = {}
 
           for _, collider in ipairs(CollidersFolder:GetChildren()) do
             if not collider:IsA('BasePart') then continue end
@@ -390,19 +296,18 @@ return function (pathFolder: Folder): { Point }
   local jsonData: string = HttpService:JSONEncode(remoteData)
 
   local success: boolean, result = pcall(function()
+    local headers: { [string]: string } = { ["Content-Type"] = "application/json" }
     return HttpService:RequestAsync({
       Url = "http://localhost:8000/generate_path",
       Method = "POST",
-      Headers = {
-        ["Content-Type"] = "application/json"
-      },
+      Headers = headers,
       Body = jsonData
     })
   end)
   if not success then
     error("Failed to contact remote path solver: " .. tostring(result))
   end
-  local pathResult = HttpService:JSONDecode(result.Body)
+  local pathResult = HttpService:JSONDecode(result.Body :: string)
   local finalPath: {Point} = {}
   for _, i in ipairs(pathResult.path) do table.insert(finalPath, Points[i]) end
 
