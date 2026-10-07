@@ -47,7 +47,7 @@ class TrainingBridge:
         Args:
             status: Whether the environment should be frozen or unfrozen.
         """
-        self._bridge.send_command("FREEZE", "", {"status": status})
+        self._bridge.freeze(status)
 
     def spawn_agents(self, env_id: str, agents: list[str]) -> None:
         """
@@ -87,7 +87,7 @@ class TrainingBridge:
             env_id: Unique identifier for the virtual environment
             actions: Dict mapping agent_id -> [throttle, steering, nitro]
         """
-        self._bridge.send_command("ACTION", env_id, actions)
+        self._bridge.send_actions(env_id, actions)
 
     def close_environment(self, env_id: str) -> None:
         """

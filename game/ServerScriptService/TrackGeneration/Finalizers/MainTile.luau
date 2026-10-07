@@ -153,8 +153,11 @@ return function (path: { Types.Point }, pathFolder: Folder): ()
       tileCount = math.min(tileCount, byContact)
       local tilePitch: number = segmentLength / tileCount
 
+      local continues: boolean = i + 2 <= #path and nextPoint.Next ~= path[i + 2]
+      local lastSlot: number = if continues then tileCount - 1 else tileCount
+
       local previousCFrame: CFrame = startCF
-      for slot = 1, tileCount do
+      for slot = 1, lastSlot do
         local placeCFrame: CFrame = if slot >= tileCount then endCF else frameAtDistance(slot * tilePitch)
         local placement: bendPlacement.Placement = {
           BoundsOffset = boundsOffset,

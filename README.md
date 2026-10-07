@@ -70,7 +70,7 @@ python main.py --latency                  # Also measure bridge delays
 | Route | Description |
 |-------|-------------|
 | `GET /` | Server status, active model, whether latency measurement is on |
-| `GET /latency` | Rolling mean/p50/p90/p99/max for the `transport` and `step` trackers, plus observation-timeout counts. Requires `--latency` |
+| `GET /latency` | Rolling mean/p50/p90/p99/max for the `transport`, `tick`, `action` and `step` trackers, plus observation-timeout counts. Requires `--latency` |
 | `WS /ws/{model_id}` | The Roblox client connects here |
 
 ### 2. DataBridge (Internal)
@@ -159,11 +159,14 @@ PettingZooWSEnv
 
 ```python
 HYPERPARAMETERS = {
+    "total_timesteps": 200_000,
     "learning_rate": 0.0003,
-    "batch_size": 64,           # Smaller for on-policy updates
-    "n_steps": 1024,            # Steps before each update
+    "batch_size": 4096,
+    "n_steps": 2048,            # Per environment
+    "n_epochs": 4,
     "ent_coef": 0.01,           # Entropy coefficient for exploration
-    "net_arch": [256, 256],     # Neural network architecture
+    "net_arch": [128, 128],     # Neural network architecture
+    "device": "cpu",
 }
 ```
 
@@ -177,12 +180,15 @@ HYPERPARAMETERS = {
 
 ```python
 HYPERPARAMETERS = {
+    "total_timesteps": 200_000,
     "learning_rate": 0.0003,
-    "batch_size": 256,          # Larger for off-policy
-    "buffer_size": 100_000,     # Replay buffer size
-    "tau": 0.005,               # Target network update rate
+    "batch_size": 512,          # Larger for off-policy
+    "buffer_size": 1_000_000,   # Replay buffer size
     "ent_coef": "auto",         # Auto-tuned entropy
     "net_arch": [256, 256],
+    "device": "cpu",
+    "train_freq": 256,
+    "gradient_steps": 256,
 }
 ```
 
@@ -274,17 +280,29 @@ Communication:
 - `get_latest_obs()` blocks with 10s timeout to prevent deadlock
 - Sender/receiver run as concurrent asyncio tasks
 
+## Measuring Bridge Latency
+
+Start the backend with `--latency` and read `GET /latency`. There are four tracked properties:
+- `transport` - Raw websocket round trip of a PING that Roblox echoes straight back
+- `tick` - Interval between consecutive simulation ticks arriving at the server
+- `action` - Action-to-effect latency`action_seq`
+- `step` - How long the learner waits for observations after sending actions
+
+Mean, p50, p90, p99 and max are reported over the last 2000 samples.
+
 ## Proposed Observation Space
 
 | Index | Value | Range | Description |
 |-------|-------|-------|-------------|
-| 0-9 | Raycasts | 0-1 | Normalized distance to obstacles |
-| 10 | Nitro | 0-1 | Current nitro fuel level |
-| 11 | Velocity | -1 to 1 | Normalized speed (forward/backward) |
-| 12 | IsReverse | 0 or 1 | Car facing wrong direction |
+| 0..N-1 | Raycasts | 0-1 | Normalized distance to obstacles. Count comes from the vehicle's `Config` script and rays with `IncludeNormal` contribute a second value |
+| N | Nitro | 0-1 | Current nitro fuel level |
+| N+1 | Velocity | -1 to 1 | Normalized speed (forward/backward) |
+| N+2 | IsReverse | 0 or 1 | Car facing wrong direction |
+| N+3..N+5 | Previous action | -1 to 1 | *Optional* - throttle, steering, nitro as last commanded |
 
 **With Frame Stacking (STACK_SIZE=4):**
-- Final observation shape: `(13 * 4,) = (52,)`
+- Final observation shape is `(width * 4,)`, where `width` is measured at connect time
+- A stack is restarted at every episode boundary, so no frame leaks across a respawn
 - Provides temporal information for velocity/acceleration inference
 
 ## Proposed Action Space
@@ -309,7 +327,12 @@ game/
 │   │   ├── CarScripts/
 │   │   │   ├── Controller.luau         # Input handling, nitro, speed control
 │   │   │   ├── Constants.luau          # Attribute names, physics constants
-│   │   │   └── Units.luau              # Unit conversions (studs → mph)
+│   │   │   ├── Units.luau              # Unit conversions (studs -> mph)
+│   │   │   ├── Attributes.luau         # Number-attribute reading and caching shared by the car scripts
+│   │   │   ├── SetInputEvent           # RemoteEvent for player-driven input
+│   │   │   └── Server/
+│   │   │       ├── ConstraintUpdater.server.luau  # Applies tuning attributes to constraints
+│   │   │       └── Redresser.server.luau          # Fixes an overturned vehicle
 │   │   ├── Recolor.luau                # Environment-based car coloring
 │   │   └── WeldAll.luau                # Welding car parts together (Creating proper joints)
 │   ├── CarsAIController/
@@ -320,11 +343,23 @@ game/
 │   ├── TrackGeneration/
 │   │   ├── init.luau                   # Track generator (shape) & finalizer (cosmetics) orchestrator
 │   │   ├── types.luau                  # Point type definitions
+│   │   ├── FinalizerCommon.luau        # Checkpoint gates and segment frames shared by the finalizers
+│   │   ├── PathGeometry.luau           # Planar intersection/distance tests shared by the generators
 │   │   ├── Methods/                    # Track generation algorithms
 │   │   │   ├── Main.luau               # A*-inspired path generation
 │   │   │   └── RemoteSolver.luau       # OR-Tools (deprecated) integration via HTTP
-│   │   └── Finalizers/                 # Track cosmetics generation (mesh / tiles / others...)
-│   └── Utilities/                      # Helper modules
+│   │   └── Finalizers/                 # Track cosmetics generation
+│   │       ├── Main.luau               # Swept mesh road (default)
+│   │       ├── MainParts.luau          # Parts placed along the spline, meshed
+│   │       ├── MainTile.luau           # Pre-built TrackBase tiles via redupe
+│   │       └── Simple.luau             # Plain parts + resize-align
+│   └── Utilities/
+│       ├── Spline.luau                 # Centripetal Catmull-Rom, shared by every finalizer
+│       ├── BoundingBox.luau            # Bounding box of a part set in a given basis
+│       ├── PriorityQueue.luau          # Binary heap used by the generator
+│       ├── RayClosestPoint.luau        # Point-to-segment projection (checkpoint progress)
+│       ├── aligner.luau                # Stravant's resize-align
+│       └── redupe/                     # Stravant's redupe (bend placement, ghost preview)
 ├── ServerStorage/
 │   ├── TrackBase.rbxmx                 # Road segment templates
 │   └── CarModels/                      # Vehicle models
@@ -337,13 +372,28 @@ game/
 Handles main settings and initializes the modules (generation and environment controller).
 
 ```luau
-local wsUrl: string = `ws://localhost:8000/ws/{modelId}`  -- WebSocket URL
-local TrackGeneration = require(TrackGeneration)          -- Track generator
-local CarsAIController = require(CarsAIController)        -- Agent controller
+local modelId: string = 'someModelId'
+local carModel: string = 'Car'                    -- Any name of the car from ServerStorage/CarModels
+local wsUrl: string = `ws://localhost:8000/ws/{modelId}`
+local wallKill: boolean = true                    -- Terminate on wall contact
+local enableCollisions: boolean = true            -- Collisions inside a virtual environment
+local terminateAll: boolean = false               -- Shared-Fate: one failure ends the cohort
+local noProgressTimeout: number = 5               -- Seconds without new best progress before truncation
 
-TrackGeneration('Main', 'Main')                           -- Generate track
-CarsAIController.Init(carModel, wsUrl)                    -- Start training
+-- Seed of the track generation (to avoid track regenerations between tests or parameter changes)
+local fixedSeed: number? = nil
+local seedModule: Instance? = script.Parent:FindFirstChild('seed')
+if seedModule ~= nil and seedModule:IsA('ModuleScript') then
+    fixedSeed = require(seedModule) :: number?
+end
+
+local GenerationMethod: string = 'Main'           -- Methods/<name>.luau
+local Finalizer: string = 'MainTile'              -- Finalizers/<name>.luau
+
+Workspace:SetAttribute("SEED", seed)
+TrackGeneration(GenerationMethod, Finalizer)
 ```
+
 
 ### WebSocket Command Handler (`CmdHandler.luau`)
 
@@ -356,22 +406,29 @@ Commands received from Python server:
 | `RESET_AGENTS` | `{agents: string[]}` | Reset agents (teleport to spawn) |
 | `REMOVE_AGENTS` | `{agents: string[]}` | Remove agents from environment |
 | `ACTION` | `{[agentId]: [throttle, steering, nitro]}` | Apply inputs to cars |
-| `FREEZE` | `{status: boolean}` | Anchor/unanchor all car parts |
-| `UPDATE_COLLISIONS` | `{enable_collisions: boolean}` | Toggle inter-agent collisions |
+| `FREEZE` | `{status: boolean}` | Anchor/unanchor all car parts. Assembly velocities are saved on freeze and restored on unfreeze |
+| `UPDATE_COLLISIONS` | `{enable_collisions: boolean}` | Toggle collisions between agents of the same virtual environment |
 | `CLOSE` | `{}` | Cleanup single environment |
 | `CLOSE_ALL` | `{}` | Cleanup all environments |
 | `PING` | `{id: any}` | Echoed straight back as `__pong` without touching the simulation, so the round trip measures transport only |
 
 ### Car Physics System
 
-The car controller uses Roblox's physics engine with:
+Vehicles are assemblies of Roblox physics constraints solved together by the engine's Projected Gauss-Seidel solver.
 
-- **Throttle/Brake**: Torque applied to wheels based on `throttleInput`
-- **Steering**: Wheel hinge angle based on `steeringInput` with speed-based reduction
-- **Nitro**: Temporary linear velocity boost (limited fuel, auto-recharge)
-- **Speed (Velocity)**
+Elements that are simulated:
+- **Mass and inertia** coming from each part's volume and density
+- **Suspension** using four `SpringConstraints` - damped harmonic oscillators.
+- **Load transfer and grip**
+- **Ackermann geometry**
 
-On top of those values the below values may be controlled:
+Steering that is applied:
+- **Throttle / Brake**: Torque is applied to wheels based on `throttleInput` using `CylindricalConstraint` to reach target angular velocity. Torque is capped and applied through the tyre, so traction loss might happen.
+- **Steering**: Wheel hinge angle based on `steeringInput` with speed-based reduction. It is achieved using a `PrismaticConstraint`.
+- **Nitro**: Temporary linear velocity boost (limited fuel, auto-recharge) applied to the chassis. It bypasses the tires so it is applied regardless of available grip. The nitro fufel is limited and is automatically recharged when not used.
+- **Handbrake**: Locks the rear wheels which might result in a drift
+
+Controllable properties are:
 - **Wheels density**
 - **Wheels elasticity**
 - **Wheels kinetic friction**
@@ -396,7 +453,7 @@ Enabling natural drift of the vehicles.
 - **Nitro torque**
 The vehicles also automatically redress in case they are placed upside-down.
 
-Those settings should cast some light on the vehicles' physics handling. It should be furthermore mentioned that the vehicles utilize built-in physics constraints built into Roblox engine. Those are springs, linear velocities, cylindrical constraints, orientation aligner, prismatic constraints and of course hinge constraints used for connecting pieces together.
+It should be furthermore mentioned that the vehicles utilize more built-in physics constraints built into Roblox engine than aforementioned. Those are springs, linear velocities, cylindrical constraints, orientation aligner, prismatic constraints and of course hinge constraints used for connecting pieces together.
 
 On top of that each vehicle has configurable raycasts for observations via a `Config` script put inside the vehicle model.
 ```luau
@@ -404,55 +461,60 @@ local ChassisPart = script.Parent:WaitForChild('Chassis')
 return {
 	Rays = {
 		{
-			Source = ChassisPart, -- Source position of the raycast
-			Direction = Vector3.new(0, 0, -15) * 25, -- Direction of the raycast
-			IncludeNormal = false, -- Whether additional info about raycast normal should be included
-			IgnoreCars = true, -- Whether this raycast should ignore other vehicles within same virtual environment
-			IgnoreXZRotation = false -- Only account Y-axis rotation of the vehicle (raycasts would be horizontal)
+			Source = ChassisPart,                     -- Origin part
+			Direction = Vector3.new(0, 0, -15) * 25,  -- Direction and range of the raycast
+			IncludeNormal = false,                    -- Also report the hit surface normal
+			IgnoreCars = true,                        -- whether the vehicle sees other cars
+			IgnoreXZRotation = false,                 -- Keep only the vehicle's yaw, so the raycast stays horizontal
+			IgnoreTrack = true,                       -- ignore parts belonging to road
+			Offset = nil,                             -- Offset of the raycast origin from the origin part (Source)
 		},
 		...
 	}
 }
 ```
 
+Distances are measured from the offset origin and normalised by the ray's range.
+
 ### Other agent observations
 
-Other observations are defined within the `CarsController.luau` file (`RetrieveObservation` function). By default the observations consist of the normalized raycasts results, nitro status, velocity and information whether the car is following the right direction (not driving in the opposite way).
+Other observations are defined within the `CarsController.luau` file. By default the observations consist of the normalized raycast results, nitro status, velocity, whether the car is following the right direction.
 
 ### Checkpoints tracking
 
 Checkpoints are used to determine the agents' progress in track. They're also used to count the laps reliably.
-Parts representing checkpoints are being placed during the cosmetics generation phase. They are put where nodes have previously been. Agent's position is determined by finding the closest ray between checkpoints' centers and measuring it's relative position on it. Then the distance of all previous checkpoints is appropriately accounted.
+Parts representing checkpoints are being placed during the cosmetics generation phase. They are put where nodes have previously been. An agent's position is determined by finding the closest ray between checkpoint centres and measuring its relative position along it; the distance of all previous checkpoints is then accounted for.
 
 ### Reward Function
 
 Reward function is being determined within the `CmdHandler.luau` script. It also performs the checkpoints tracking.
 
 ```lua
-... -- Checkpoint tracking
-... -- Truncation handling (if no progress has been made for a while)
-local reward: number = 0
+if isTouchingWall and wallKill then markAgentForTermination() end
 
-reward += (currentProgress - lastProgress) * 1000
-if reward < 0 then reward *= 25 end -- Multiply additionaly by 25 if the reward negative
+... -- Checkpoint tracking and lap counting
+... -- Anti-cheat: progress beyond the next unconfirmed checkpoint snaps back to the last confirmed one, so cutting across the course earns nothing
+... -- Truncation handling (if no new best progress for NoProgressTimeout seconds)
 
--- Apply non-linear speed bonus
-local normalizedSpeed: number = math.clamp(velocity / maxVelocity, 0, 1)
-local speedBonus: number = (math.exp(normalizedSpeed * 2) - 1) * 0.5 -- max ~3.2 at full speed
--- reward += speedBonus -- Optional
+local reward: number = (totalProgress - lastReportedProgress) * 1000
+if reward < 0 then reward *= 25 end -- Reversing costs 25x what driving forward pays
 
-if isSharedFateMode then
-  local distanceReward = 0
-  if isThereNextCar() then
-    distanceReward += 0.005 * deltaDistanceToNextCar
+if terminateAll then -- Shared-Fate mode only
+  local total, counted = 0, 0
+  if hasNextCar then
+    total += -(distanceToNextCar - previousDistanceToNextCar)  -- closing on the leader pays
+    counted += 1
+  else
+    reward += 1 -- no leading car: bonus for holding first place
   end
-  if isTherePreviousCar() then
-	distanceReward -= 0.005 * deltaDistanceToPreviousCar
+  if hasFollowingCar then
+    total += (distanceToFollowingCar - previousDistanceToFollowingCar) -- pulling away pays
+    counted += 1
+  else
+    reward -= 1 -- no trailing car: penalty for being last
   end
-  if isThereNextCar() and isTherePreviousCar() then distanceReward /= 2 end
-  reward += distanceRewad
-  if isFirstPostition then reward += 1 end
-  if isLastPosition then reward -= 1 end
+  if counted > 0 then total /= counted end
+  reward += total * 0.005
 end
 
 local terminalPenalty: number = 0
@@ -475,7 +537,8 @@ Agent is automatically being truncated if they do not make any track progress fo
 ### Multi-Environment Isolation
 
 Each virtual environment gets its own **collision group** via PhysicsService:
-- Agents in different environments may or may not collide basing on the `UPDATE_COLLISIONS` setting
+- Agents in different environments never collide and never see each other - each environment is its own collision group and raycasts filter out other environments' cars
+- Agents in the same environment collide or not depending on the `UPDATE_COLLISIONS` setting
 - Different environments are visually distinguished by highlight colors
 
 ---
@@ -565,11 +628,11 @@ Offloads path generation to Python server using OR-Tools CP-SAT solver was attem
 
 Nodes picked for track generation are being used to further generate the actual track. Catmull-Rom spline helps to create a smooth transition between nodes. Some nodes have pre-set direction (such as pre-built structures) that is being used to determine the some of the spline points. For basic nodes the direction is based on their neighbouring nodes.
 
-Few finishers were implemented as we were trying to achieve the best quality possible:
-- **Simple** puts really basic road parts along the spline and connects them using Stravant's align module (that resizes the parts properly to fill the gaps between them).
-- **MainTile** uses pre-created `TrackBase` located within `ServerStorage` that is being generated in two directions (forward from the previous checkpoint and backward from the next one). Stravant's redupe module is being utilized to make sure that the tiles stick to each other with at least one side and then to fill gaps taking all sub-parts into account.
-- **MainParts** uses similar approach to the MainTile but instead of ensuring connectivity the parts are being placed along the spline just making sure that they do not collide. They are further used to generate a smooth continuous mesh (Also uses the forward and backward approach).
-- **Main** best tested approach so far. Spline points are being probed more frequently. Sometimes they in fact overlap but an algorithm is put in place to make sure that no points are allowed to be placed behind already placed ones (Also uses the forward and backward approach).
+Several finalizers were implemented as we were trying to achieve the best quality possible:
+- **Simple** puts really basic road parts along the spline and connects them using Stravant's align module, which resizes the parts to fill the gaps between them.
+- **MainTile** repeats the pre-created `TrackBase` from `ServerStorage` along the curve, using Stravant's redupe to build a wedge fill at each joint.
+- **MainParts** places parts along the spline without enforcing connectivity, then uses them to generate a smooth continuous mesh.
+- **Main** builds one shared station polyline for the whole run and cuts each knot's mesh part from those shared stations.
 
 ## Pre-built structures
 

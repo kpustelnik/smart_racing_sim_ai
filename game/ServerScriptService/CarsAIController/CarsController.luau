@@ -1,6 +1,7 @@
 --!strict
 local Workspace = game:GetService('Workspace')
 local CollectionService = game:GetService('CollectionService')
+local PhysicsService = game:GetService('PhysicsService')
 local CarsFolder: Instance = Workspace:WaitForChild('Cars')
 
 local CheckpointsController = require(script.Parent:WaitForChild('CheckpointsController'))
@@ -121,6 +122,26 @@ type RayConfig = {
   Offset: Vector3?
 }
 
+local ROAD_GROUP: string = 'TrackRoad'
+local RAYS_IGNORING_ROAD_GROUP: string = 'RaysIgnoringRoad'
+local roadGroupReady: boolean = false
+
+local function ensureRoadGroup(): ()
+  if roadGroupReady then return end
+  roadGroupReady = true
+
+  for _, group: string in { ROAD_GROUP, RAYS_IGNORING_ROAD_GROUP } do
+    if not PhysicsService:IsCollisionGroupRegistered(group) then
+      PhysicsService:RegisterCollisionGroup(group)
+    end
+  end
+  PhysicsService:CollisionGroupSetCollidable(ROAD_GROUP, RAYS_IGNORING_ROAD_GROUP, false)
+
+  for _, roadPart: Instance in ipairs(CollectionService:GetTagged('ROAD')) do
+    if roadPart:IsA('BasePart') then roadPart.CollisionGroup = ROAD_GROUP end
+  end
+end
+
 local EnableDebugPartsRays: boolean = false
 local EnableDebugPartsRayHits: boolean = false
 local DefaultRaycastOffset = Vector3.new(0, 7, 0)
@@ -151,13 +172,12 @@ CarsController.GetRaycasts = function (car: Model): { number }?
       end
       table.insert(IgnoredDescendants, car) -- Ignore the car itself
     end
+    params.FilterDescendantsInstances = IgnoredDescendants
     -- Ignore the track if cars should be detected
     if ignoreTrack then
-      for _, roadPart: Instance in ipairs(CollectionService:GetTagged('ROAD')) do
-        if roadPart:IsA('BasePart') then table.insert(IgnoredDescendants, roadPart) end
-      end
+      ensureRoadGroup()
+      params.CollisionGroup = RAYS_IGNORING_ROAD_GROUP
     end
-    params.FilterDescendantsInstances = IgnoredDescendants
 
     filters[key] = params
     return params
@@ -248,6 +268,7 @@ export type CarData = {
   LastCheckpoint: number,
   LastObservation: CarObservation?,
   LastAction: { number }?,
+  LastActionSeq: number?,
   FrozenVelocities: { [BasePart]: { Linear: Vector3, Angular: Vector3 } }?,
   LastUpdateTime: number?,
   IsTouchingWall: boolean,
@@ -447,6 +468,7 @@ CarsController.SetupCar = function (Id: string, EnvId: string, Model: string, Sp
     LastCheckpoint = 1,
     LastObservation = nil,
     LastAction = nil,
+    LastActionSeq = nil,
     FrozenVelocities = nil,
     LastUpdateTime = nil,
     IsTouchingWall = false,

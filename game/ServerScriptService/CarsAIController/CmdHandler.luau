@@ -169,9 +169,11 @@ CmdHandler['CLOSE_ALL'] = function (self: CmdHandler, _data: CloseAllData, _envI
   end
 end
 
-type ActionData = { [string]: { number } }
+type ActionData = { [string]: any }
 CmdHandler['ACTION'] = function (self: CmdHandler, data: ActionData, _envId: string?): ()
+  local seq: number? = tonumber(data.__seq)
   for agentId: string, agentData in pairs(data) do
+    if string.sub(agentId, 1, 2) == '__' then continue end -- Control fields
     local carData: CarsController.CarData? = CarsController.GetCarData(agentId)
     if carData == nil then continue end
 
@@ -189,6 +191,7 @@ CmdHandler['ACTION'] = function (self: CmdHandler, data: ActionData, _envId: str
     carData.CarInputs:SetAttribute('nitroInput', nitro > 0.5)
     carData.IsStateUpdated = true
     carData.LastAction = { throttle, steering, nitro }
+    carData.LastActionSeq = seq
 
     -- Update car physics
     local lastUpdateTime: number? = carData.LastUpdateTime
@@ -497,7 +500,8 @@ type DataToSend = {
   last_observation: { number }?,
   reward: number,
   terminated: boolean,
-  truncated: boolean
+  truncated: boolean,
+  action_seq: number?
 }
 CmdHandler.Setup = function (self: CmdHandler): ()
   if self.HeartbeatEvent ~= nil then return end -- Already set up
@@ -590,7 +594,8 @@ CmdHandler.Setup = function (self: CmdHandler): ()
             last_observation = finalObservation,
             reward = reward,
             terminated = wasTerminationPending,
-            truncated = wasTruncationPending or (self.TerminateAll and AnyAgentTerminating and not wasTerminationPending)
+            truncated = wasTruncationPending or (self.TerminateAll and AnyAgentTerminating and not wasTerminationPending),
+            action_seq = CarData.LastActionSeq
           } :: DataToSend
         end
       end

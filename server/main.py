@@ -34,9 +34,10 @@ from models import get_trainer, latency, list_available_models, TrainingBridge
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 8000
 OBSERVATION_TIMEOUT = 10.0
-PING_INTERVAL = 5.0
+PING_INTERVAL = 1.0
 COMMAND_POLL_INTERVAL = 0.01
 CONTROL_PREFIX = "__"
+ACTION_SEQ_KEY = CONTROL_PREFIX + "seq"
 SHUTDOWN_GRACE = 30.0
 
 MAX_QUEUED_OBSERVATIONS = 256
@@ -57,7 +58,13 @@ class DataBridge:
         self.command_queue: queue.Queue = queue.Queue()
         self._queues_lock = threading.Lock()
         self._closed = threading.Event()
+        self._frozen = threading.Event()
         self._warned_agent_cap = False
+
+        self._action_seq = 0
+        self._pending_actions: dict[int, float] = {}
+        self._actions_lock = threading.Lock()
+        self._action_latency = latency.get_tracker("action", report_every=200)
 
     def _queue_for(self, agent: str, capped: bool) -> Optional[queue.Queue]:
         with self._queues_lock:
@@ -86,7 +93,18 @@ class DataBridge:
         with self._queues_lock:
             return list(self.obs_queues.values())
 
+    def _note_action_effect(self, seq) -> None:
+        if not isinstance(seq, (int, float)):
+            return
+        with self._actions_lock:
+            sent_at = self._pending_actions.pop(int(seq), None)
+        if sent_at is not None:
+            self._action_latency.record(time.perf_counter() - sent_at)
+
     def put_incoming_data(self, agent: str, obs_data):
+        if isinstance(obs_data, dict):
+            self._note_action_effect(obs_data.get("action_seq"))
+
         agent_queue = self._queue_for(agent, capped=True)
         if agent_queue is None:
             return
@@ -122,6 +140,32 @@ class DataBridge:
     def send_command(self, command: str, env_id: str, data: Optional[dict] = None):
         payload = {"command": command, "data": data if data else {}, "envid": env_id}
         self.command_queue.put(payload)
+
+    def send_actions(self, env_id: str, actions: dict):
+        with self._actions_lock:
+            self._action_seq += 1
+            seq = self._action_seq
+            if latency.is_enabled():
+                now = time.perf_counter()
+                while self._pending_actions:
+                    oldest = next(iter(self._pending_actions))
+                    if now - self._pending_actions[oldest] < OBSERVATION_TIMEOUT:
+                        break
+                    del self._pending_actions[oldest]
+                self._pending_actions[seq] = now
+        self.send_command("ACTION", env_id, {**actions, ACTION_SEQ_KEY: seq})
+
+    def freeze(self, status: bool):
+        if status:
+            self._frozen.set()
+            with self._actions_lock:
+                self._pending_actions.clear()
+        else:
+            self._frozen.clear()
+        self.send_command("FREEZE", "", {"status": status})
+
+    def is_frozen(self) -> bool:
+        return self._frozen.is_set()
 
     def get_outgoing_command(self):
         try:
@@ -197,21 +241,21 @@ def create_app(model_type: str, mode: str = "train") -> FastAPI:
         thread.start()
 
         transport_latency = latency.get_tracker("transport", report_every=20)
+        tick_latency = latency.get_tracker("tick", report_every=200)
 
         async def sender_task():
             """Reads commands from Bridge and sends to Roblox."""
             loop = asyncio.get_running_loop()
-            last_sent: float = loop.time()
+            last_ping: float = loop.time()
             while True:
                 cmd = bridge.get_outgoing_command()
-                now: float = loop.time()
                 if cmd:
-                    last_sent = now
                     await websocket.send_json(cmd)
                 else:
                     await asyncio.sleep(COMMAND_POLL_INTERVAL)
-                if now - last_sent >= PING_INTERVAL:
-                    last_sent = now
+                now: float = loop.time()
+                if now - last_ping >= PING_INTERVAL:
+                    last_ping = now
                     await websocket.send_json(
                         {"command": "PING", "data": {"t": time.perf_counter()}}
                     )
@@ -219,13 +263,24 @@ def create_app(model_type: str, mode: str = "train") -> FastAPI:
         def handle_control_message(key: str, payload) -> None:
             if key == "__pong" and isinstance(payload, dict):
                 sent_at = payload.get("t")
-                if isinstance(sent_at, (int, float)):
+                if isinstance(sent_at, (int, float)) and not bridge.is_frozen():
                     transport_latency.record(time.perf_counter() - sent_at)
 
         async def receiver_task():
             """Reads JSON from Roblox and routes to Bridge queues."""
+            last_tick: Optional[float] = None
             while True:
                 raw_data = await websocket.receive_json()
+
+                is_control = isinstance(raw_data, dict) and len(raw_data) > 0 and all(
+                    key.startswith(CONTROL_PREFIX) for key in raw_data
+                )
+                if not is_control:
+                    now = time.perf_counter()
+                    if last_tick is not None and not bridge.is_frozen():
+                        tick_latency.record(now - last_tick)
+                    last_tick = now
+
                 if isinstance(raw_data, dict):
                     for agent_id, agent_data in raw_data.items():
                         if agent_id.startswith(CONTROL_PREFIX):

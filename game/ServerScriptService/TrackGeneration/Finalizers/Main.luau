@@ -192,7 +192,6 @@ local function createSolid(profiles: { { Vector3 } }, origin: CFrame, name: stri
   local part: MeshPart = AssetService:CreateMeshPartAsync(Content.fromObject(mesh), {
     CollisionFidelity = collisionFidelity
   })
-  mesh:Destroy()
 
   part.CFrame = origin
   part.Anchored = true

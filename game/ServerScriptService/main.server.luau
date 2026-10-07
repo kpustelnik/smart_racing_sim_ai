@@ -14,7 +14,7 @@ if seedModule ~= nil and seedModule:IsA('ModuleScript') then
 end
 
 local GenerationMethod: string = 'Main'
-local Finalizer: string = 'MainTile'
+local Finalizer: string = 'Main'
 
 local seed: number = if fixedSeed == nil then os.time() else fixedSeed
 print("Current seed:", seed)

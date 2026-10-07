@@ -39,7 +39,6 @@ end
 
 local function placeMesh(mesh: EditableMesh, origin: CFrame, name: string, color: Color3, tag: string, parent: Instance): ()
   local part: MeshPart = AssetService:CreateMeshPartAsync(Content.fromObject(mesh))
-  mesh:Destroy()
 
   part.CFrame = origin
   part.Anchored = true
